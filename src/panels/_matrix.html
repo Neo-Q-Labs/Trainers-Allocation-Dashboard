@@ -1,0 +1,84 @@
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>
+              Trainer Matrix · Engagement Grid
+            </div>
+            <div class="section-sub" style="margin-top:6px">Live allocation per trainer × day · brighter = more deliveries · hover any cell</div>
+          </div>
+          <div class="section-actions">
+            <div class="input-wrap" style="width:240px">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input class="input" placeholder="Search trainer or track...">
+            </div>
+            <div class="range-segment">
+              <button>All</button>
+              <button class="active">Free</button>
+              <button>Occupied</button>
+              <button>Conflict</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Track + Client filter for the Matrix -->
+        <div class="cal-filters" id="matrixFilters">
+          <div class="cf-group">
+            <span class="cf-label">Track</span>
+            <div class="cf-chips" data-filter-type="m-track">
+              <span class="cf-chip active" data-val="all">All</span>
+              <span class="cf-chip dsa"    data-val="dsa">DSA</span>
+              <span class="cf-chip apt"    data-val="apt">Aptitude</span>
+              <span class="cf-chip fs"     data-val="fs">Java FS</span>
+              <span class="cf-chip cloud"  data-val="cloud">.NET / Cloud</span>
+              <span class="cf-chip cy"     data-val="cy">Cy.Sec</span>
+              <span class="cf-chip sap"    data-val="sap">SAP</span>
+              <span class="cf-chip py"     data-val="py">Python / ML</span>
+            </div>
+          </div>
+          <div class="cf-group">
+            <span class="cf-label">Client</span>
+            <div class="cf-chips" data-filter-type="m-client">
+              <span class="cf-chip active" data-val="all">All</span>
+              <span class="cf-chip"        data-val="parul">Parul Univ.</span>
+              <span class="cf-chip"        data-val="skg">SKG</span>
+              <span class="cf-chip"        data-val="lti">LTIMindtree</span>
+              <span class="cf-chip"        data-val="kct">KCT</span>
+              <span class="cf-chip"        data-val="hex">Hexaware</span>
+              <span class="cf-chip"        data-val="iamneo">iamneo Internal</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="heatmap-wrap" style="margin-top:14px">
+          <div class="heatmap" id="heatmap">
+            <!-- generated -->
+          </div>
+        </div>
+
+        <div class="hm-legend">
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(255,255,255,0.03)"></span>Free</span>
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(34,211,165,0.20)"></span>1 Session</span>
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(34,211,165,0.40)"></span>2-3 Sessions</span>
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(3,37,189,0.55)"></span>Full Day</span>
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(245,197,66,0.45)"></span>Overlap</span>
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(239,68,68,0.55)"></span>Conflict</span>
+          <span class="hm-legend-item"><span class="hm-legend-swatch" style="background:rgba(255,255,255,0.01)"></span>Weekend</span>
+        </div>
+      </div>
+
+      <!-- Directory grid -->
+      <div class="card" style="margin-top:18px">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              Trainer Directory · Snapshot
+            </div>
+            <div class="section-sub" style="margin-top:6px">254 trainers monitored · 86 internal · 168 freelancer pool</div>
+          </div>
+        </div>
+        <div class="dir-grid" id="trainerDir">
+          <!-- generated -->
+        </div>
+      </div>

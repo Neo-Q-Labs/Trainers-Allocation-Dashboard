@@ -1,0 +1,262 @@
+
+      <!-- KPI strip -->
+      <div class="kpi-strip">
+        <div class="kpi">
+          <div class="kpi-label">Open Slots</div>
+          <div class="kpi-value" style="color:var(--neon-red)">12</div>
+          <div class="kpi-sub">Across 7 programmes</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Urgent (< 7 Days)</div>
+          <div class="kpi-value" style="color:var(--neon-red)">8</div>
+          <div class="kpi-sub">Start before 29 May</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Trainer-Days Needed</div>
+          <div class="kpi-value" style="color:var(--neon-yellow)">214</div>
+          <div class="kpi-sub">Cumulative across the pipeline</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Tracks Affected</div>
+          <div class="kpi-value">5</div>
+          <div class="kpi-sub">DSA · Aptitude · Cy.Sec · Java FS · Cloud</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Auto-Suggested Fills</div>
+          <div class="kpi-value" style="color:var(--neon-green)">9</div>
+          <div class="kpi-sub">75% have a clean candidate</div>
+        </div>
+      </div>
+
+      <!-- Pending allocation list -->
+      <div class="card" style="margin-top:18px">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Slots Awaiting a Trainer
+            </div>
+            <div class="section-sub" style="margin-top:6px">Sorted by urgency · auto-pulled from Request ID Track</div>
+          </div>
+          <div class="section-actions">
+            <div class="range-segment">
+              <button class="active">All</button>
+              <button>Urgent</button>
+              <button>This Week</button>
+              <button>This Month</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pending-list">
+
+          <!-- Pending slot card 1 -->
+          <div class="pending-card urgent">
+            <div class="pending-head">
+              <div>
+                <div class="pending-prog">
+                  <span class="prog-badge">SKI-099</span>
+                  <span class="prog-name">NerdX Aptitude Track</span>
+                </div>
+                <div class="pending-meta">
+                  <span class="meta-pair"><span class="lab">Client</span>SKG</span>
+                  <span class="meta-pair"><span class="lab">Window</span>21 May → 31 May</span>
+                  <span class="meta-pair"><span class="lab">Track</span>Aptitude · Quants</span>
+                </div>
+              </div>
+              <div class="pending-gap-ind">
+                <div class="gap-num">14</div>
+                <div class="gap-lab">trainers missing</div>
+              </div>
+            </div>
+            <div class="pending-progress">
+              <div class="pending-bar crit"><i style="width:33%"></i></div>
+              <div class="pending-num">7 / 21 filled</div>
+            </div>
+            <div class="pending-suggested">
+              <div class="ps-label">AUTO-SUGGESTED · 3 candidates</div>
+              <div class="ps-chips">
+                <span class="ps-chip">Karunya Mohan · 14% load · ✓ track-match</span>
+                <span class="ps-chip">Bindhiya J · 33% load · ✓ track-match</span>
+                <span class="ps-chip alt">+1 freelancer (Abdul S.)</span>
+              </div>
+            </div>
+            <div class="pending-actions">
+              <button class="btn-primary" data-action="auto-fill">Auto-fill from suggested</button>
+              <button class="btn-ghost" data-action="manual-pick">Manual Pick</button>
+              <button class="btn-ghost" data-action="hire-req">Hire (Freelancer)</button>
+            </div>
+            <div class="pending-urgency">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <strong>0 days</strong> to start · highest priority
+            </div>
+          </div>
+
+          <!-- Pending slot card 2 -->
+          <div class="pending-card urgent">
+            <div class="pending-head">
+              <div>
+                <div class="pending-prog">
+                  <span class="prog-badge">SKI-100</span>
+                  <span class="prog-name">NerdX Tech Track</span>
+                </div>
+                <div class="pending-meta">
+                  <span class="meta-pair"><span class="lab">Client</span>SKG</span>
+                  <span class="meta-pair"><span class="lab">Window</span>21 May → 26 Jun</span>
+                  <span class="meta-pair"><span class="lab">Track</span>DSA · Logic Building</span>
+                </div>
+              </div>
+              <div class="pending-gap-ind">
+                <div class="gap-num">17</div>
+                <div class="gap-lab">trainers missing</div>
+              </div>
+            </div>
+            <div class="pending-progress">
+              <div class="pending-bar crit"><i style="width:19%"></i></div>
+              <div class="pending-num">4 / 21 filled</div>
+            </div>
+            <div class="pending-suggested">
+              <div class="ps-label">AUTO-SUGGESTED · 4 candidates</div>
+              <div class="ps-chips">
+                <span class="ps-chip">Vasudevan Badri · 14% load · ✓ DSA</span>
+                <span class="ps-chip">Manopalaniraja A · 22% load · ✓ DSA</span>
+                <span class="ps-chip">Aravindhan S · 18% load · ✓ DSA</span>
+                <span class="ps-chip alt">+1 freelancer (Praveen K.)</span>
+              </div>
+            </div>
+            <div class="pending-actions">
+              <button class="btn-primary" data-action="auto-fill">Auto-fill from suggested</button>
+              <button class="btn-ghost" data-action="manual-pick">Manual Pick</button>
+              <button class="btn-ghost" data-action="hire-req">Hire (Freelancer)</button>
+            </div>
+            <div class="pending-urgency">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <strong>0 days</strong> to start · highest priority
+            </div>
+          </div>
+
+          <!-- Pending slot card 3 -->
+          <div class="pending-card">
+            <div class="pending-head">
+              <div>
+                <div class="pending-prog">
+                  <span class="prog-badge">Parul-135</span>
+                  <span class="prog-name">BCA/MCA · TT Integrated</span>
+                </div>
+                <div class="pending-meta">
+                  <span class="meta-pair"><span class="lab">Client</span>Parul University</span>
+                  <span class="meta-pair"><span class="lab">Window</span>1 Jun → 25 Sep</span>
+                  <span class="meta-pair"><span class="lab">Track</span>DSA · OS · Aptitude</span>
+                </div>
+              </div>
+              <div class="pending-gap-ind">
+                <div class="gap-num">4</div>
+                <div class="gap-lab">trainers missing</div>
+              </div>
+            </div>
+            <div class="pending-progress">
+              <div class="pending-bar warn"><i style="width:60%"></i></div>
+              <div class="pending-num">6 / 10 filled</div>
+            </div>
+            <div class="pending-suggested">
+              <div class="ps-label">AUTO-SUGGESTED · 2 candidates</div>
+              <div class="ps-chips">
+                <span class="ps-chip">Sai Raghavendra B · 38% load · ✓ track-match</span>
+                <span class="ps-chip">Preethika TND · 22% load · ✓ track-match</span>
+              </div>
+            </div>
+            <div class="pending-actions">
+              <button class="btn-primary" data-action="auto-fill">Auto-fill from suggested</button>
+              <button class="btn-ghost" data-action="manual-pick">Manual Pick</button>
+              <button class="btn-ghost" data-action="hire-req">Hire (Freelancer)</button>
+            </div>
+            <div class="pending-urgency warn">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <strong>10 days</strong> to start
+            </div>
+          </div>
+
+          <!-- Pending slot card 4 -->
+          <div class="pending-card">
+            <div class="pending-head">
+              <div>
+                <div class="pending-prog">
+                  <span class="prog-badge">LTIM-Bhub-024</span>
+                  <span class="prog-name">SDET Java · Batch 2</span>
+                </div>
+                <div class="pending-meta">
+                  <span class="meta-pair"><span class="lab">Client</span>LTIMindtree</span>
+                  <span class="meta-pair"><span class="lab">Window</span>8 Jun → 19 Jun</span>
+                  <span class="meta-pair"><span class="lab">Track</span>SDET · Java · Selenium</span>
+                </div>
+              </div>
+              <div class="pending-gap-ind">
+                <div class="gap-num">1</div>
+                <div class="gap-lab">trainer missing</div>
+              </div>
+            </div>
+            <div class="pending-progress">
+              <div class="pending-bar warn"><i style="width:75%"></i></div>
+              <div class="pending-num">3 / 4 filled</div>
+            </div>
+            <div class="pending-suggested">
+              <div class="ps-label">AUTO-SUGGESTED · 1 candidate</div>
+              <div class="ps-chips">
+                <span class="ps-chip">Surya K · 96% load · ⚠ near-capacity</span>
+                <span class="ps-chip alt">Open replacement engine for swap</span>
+              </div>
+            </div>
+            <div class="pending-actions">
+              <button class="btn-primary" data-action="auto-fill">Auto-fill</button>
+              <button class="btn-ghost" data-action="open-replace">Run Replacement Engine</button>
+              <button class="btn-ghost" data-action="hire-req">Hire (Freelancer)</button>
+            </div>
+            <div class="pending-urgency warn">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <strong>17 days</strong> to start
+            </div>
+          </div>
+
+          <!-- Pending slot card 5 -->
+          <div class="pending-card">
+            <div class="pending-head">
+              <div>
+                <div class="pending-prog">
+                  <span class="prog-badge">LTM-001</span>
+                  <span class="prog-name">LTM Internship · CySec</span>
+                </div>
+                <div class="pending-meta">
+                  <span class="meta-pair"><span class="lab">Client</span>LTIMindtree Mumbai</span>
+                  <span class="meta-pair"><span class="lab">Window</span>22 Jun → 4 Jul</span>
+                  <span class="meta-pair"><span class="lab">Track</span>Cyber · Forensics</span>
+                </div>
+              </div>
+              <div class="pending-gap-ind">
+                <div class="gap-num">2</div>
+                <div class="gap-lab">trainers missing</div>
+              </div>
+            </div>
+            <div class="pending-progress">
+              <div class="pending-bar crit"><i style="width:33%"></i></div>
+              <div class="pending-num">1 / 3 filled</div>
+            </div>
+            <div class="pending-suggested">
+              <div class="ps-label">AUTO-SUGGESTED · 2 candidates</div>
+              <div class="ps-chips">
+                <span class="ps-chip">Yogeshwaran K · 31% load · ✓ Cy.Sec owner</span>
+                <span class="ps-chip alt">+1 freelancer (Tomy A.)</span>
+              </div>
+            </div>
+            <div class="pending-actions">
+              <button class="btn-primary" data-action="auto-fill">Auto-fill from suggested</button>
+              <button class="btn-ghost" data-action="manual-pick">Manual Pick</button>
+              <button class="btn-ghost" data-action="hire-req">Hire (Freelancer)</button>
+            </div>
+            <div class="pending-urgency">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <strong>31 days</strong> to start
+            </div>
+          </div>
+
+        </div>
+      </div>

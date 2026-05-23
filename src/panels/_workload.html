@@ -1,0 +1,244 @@
+
+      <!-- KPI strip -->
+      <div class="kpi-strip">
+        <div class="kpi">
+          <div class="kpi-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 5-5"/></svg>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-label">Team Avg Load</div>
+            <div class="kpi-value">68<span class="unit">%</span></div>
+            <div class="kpi-trend">↑ 4pp vs Apr</div>
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:rgba(239,68,68,0.12);color:var(--neon-red)">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-label">Over-Loaded (&gt;85%)</div>
+            <div class="kpi-value crit">11</div>
+            <div class="kpi-trend">7 internal · 4 freelancer</div>
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:rgba(34,211,165,0.12);color:var(--neon-green)">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-label">Bench Utilisation</div>
+            <div class="kpi-value ok">42<span class="unit">%</span></div>
+            <div class="kpi-trend">17 trainers idle &gt;7d</div>
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v8a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z"/></svg>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-label">Internal : Freelancer</div>
+            <div class="kpi-value">58<span style="font-size:14px;color:var(--text-muted);font-weight:700"> : 42</span></div>
+            <div class="kpi-trend">Target mix 60:40</div>
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:rgba(245,197,66,0.12);color:var(--neon-yellow)">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-label">Forecast Accuracy</div>
+            <div class="kpi-value warn">81<span class="unit">%</span></div>
+            <div class="kpi-trend">Last 4 wks predicted</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="workload-grid">
+
+        <!-- LEFT: Histogram -->
+        <div class="card">
+          <div class="card-h">
+            <div class="card-title">Workload Distribution · 254 Trainers</div>
+            <div class="card-sub">Histogram of allocation % across the active trainer pool</div>
+          </div>
+          <div class="histogram" id="loadHist"></div>
+          <div class="hist-legend">
+            <span><i class="low"></i>Idle 0–20</span>
+            <span><i class="low"></i>Low 20–40</span>
+            <span><i class="mid"></i>Healthy 40–60</span>
+            <span><i class="mid"></i>Optimal 60–85</span>
+            <span><i class="warn"></i>High 85–95</span>
+            <span><i class="crit"></i>Critical 95+</span>
+          </div>
+        </div>
+
+        <!-- RIGHT: Lanes -->
+        <div class="card">
+          <div class="card-h">
+            <div class="card-title">Top Loaded · Under-Utilised</div>
+            <div class="card-sub">Outliers needing rebalancing</div>
+          </div>
+          <div style="font:800 9px/1 var(--font);text-transform:uppercase;letter-spacing:0.12em;color:var(--neon-red);margin:14px 0 8px">⬆ Over-Loaded · 5 of 11</div>
+          <div class="lanes-row">
+            <div class="lane">
+              <div class="lane-name">Surya K<small>neo10376 · DSA/SDET</small></div>
+              <div class="lane-bar crit"><i style="width:96%"></i></div>
+              <div class="lane-val crit">96%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Sahil Deswal<small>neo10408 · ML</small></div>
+              <div class="lane-bar crit"><i style="width:94%"></i></div>
+              <div class="lane-val crit">94%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Yogeshwaran K<small>neo10417 · CySec</small></div>
+              <div class="lane-bar warn"><i style="width:91%"></i></div>
+              <div class="lane-val warn">91%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Sai Raghavendra B<small>neo10394 · .NET</small></div>
+              <div class="lane-bar warn"><i style="width:88%"></i></div>
+              <div class="lane-val warn">88%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Anthony Sahaya M<small>neo10166 · Angular</small></div>
+              <div class="lane-bar warn"><i style="width:86%"></i></div>
+              <div class="lane-val warn">86%</div>
+            </div>
+          </div>
+          <div style="font:800 9px/1 var(--font);text-transform:uppercase;letter-spacing:0.12em;color:var(--neon-green);margin:18px 0 8px">⬇ Under-Utilised · 5 of 17</div>
+          <div class="lanes-row">
+            <div class="lane">
+              <div class="lane-name">Abinaya P<small>neo10400 · C/DSA</small></div>
+              <div class="lane-bar low"><i style="width:9%"></i></div>
+              <div class="lane-val low">9%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Siva Prasanna S<small>neo10221 · Java FS</small></div>
+              <div class="lane-bar low"><i style="width:12%"></i></div>
+              <div class="lane-val low">12%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Vasudevan Badri<small>neo10371 · SDET-Java</small></div>
+              <div class="lane-bar low"><i style="width:14%"></i></div>
+              <div class="lane-val low">14%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Bindhiya J<small>neo10457 · DSA</small></div>
+              <div class="lane-bar low"><i style="width:33%"></i></div>
+              <div class="lane-val low">33%</div>
+            </div>
+            <div class="lane">
+              <div class="lane-name">Karunya Mohan<small>neo10396 · Python</small></div>
+              <div class="lane-bar low"><i style="width:43%"></i></div>
+              <div class="lane-val low">43%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skill × Week heatmap -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-h" style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div class="card-title">Skill-Area Load · 8-Week Window</div>
+            <div class="card-sub">Internal pool only · % allocation</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font:700 9px/1 var(--mono);color:var(--text-muted)">LOW</span>
+            <div style="display:flex;gap:2px">
+              <div style="width:14px;height:14px;border-radius:3px;background:rgba(34,211,165,0.16)"></div>
+              <div style="width:14px;height:14px;border-radius:3px;background:rgba(3,37,189,0.22)"></div>
+              <div style="width:14px;height:14px;border-radius:3px;background:rgba(3,37,189,0.45)"></div>
+              <div style="width:14px;height:14px;border-radius:3px;background:rgba(245,197,66,0.45)"></div>
+              <div style="width:14px;height:14px;border-radius:3px;background:rgba(239,68,68,0.55)"></div>
+            </div>
+            <span style="font:700 9px/1 var(--mono);color:var(--text-muted)">HIGH</span>
+          </div>
+        </div>
+        <div class="skillweek">
+          <div></div>
+          <div class="sw-header">W22<br><span style="opacity:0.6">25 May</span></div>
+          <div class="sw-header">W23<br><span style="opacity:0.6">01 Jun</span></div>
+          <div class="sw-header">W24<br><span style="opacity:0.6">08 Jun</span></div>
+          <div class="sw-header">W25<br><span style="opacity:0.6">15 Jun</span></div>
+          <div class="sw-header">W26<br><span style="opacity:0.6">22 Jun</span></div>
+          <div class="sw-header">W27<br><span style="opacity:0.6">29 Jun</span></div>
+          <div class="sw-header">W28<br><span style="opacity:0.6">06 Jul</span></div>
+          <div class="sw-header">W29<br><span style="opacity:0.6">13 Jul</span></div>
+
+          <div class="sw-row-label">DSA / Foundation</div>
+          <div class="sw-cell l2">42</div><div class="sw-cell l4">78</div><div class="sw-cell l5">96</div><div class="sw-cell l5">94</div><div class="sw-cell l4">82</div><div class="sw-cell l3">65</div><div class="sw-cell l3">58</div><div class="sw-cell l2">44</div>
+
+          <div class="sw-row-label">SDET / Selenium</div>
+          <div class="sw-cell l1">22</div><div class="sw-cell l2">38</div><div class="sw-cell l4">76</div><div class="sw-cell l5">91</div><div class="sw-cell l4">74</div><div class="sw-cell l2">41</div><div class="sw-cell l2">36</div><div class="sw-cell l1">19</div>
+
+          <div class="sw-row-label">Java Full-Stack</div>
+          <div class="sw-cell l2">48</div><div class="sw-cell l3">62</div><div class="sw-cell l3">68</div><div class="sw-cell l3">71</div><div class="sw-cell l3">66</div><div class="sw-cell l3">59</div><div class="sw-cell l2">48</div><div class="sw-cell l2">42</div>
+
+          <div class="sw-row-label">Python / ML</div>
+          <div class="sw-cell l2">35</div><div class="sw-cell l3">66</div><div class="sw-cell l4">84</div><div class="sw-cell l5">93</div><div class="sw-cell l4">86</div><div class="sw-cell l3">69</div><div class="sw-cell l2">47</div><div class="sw-cell l1">28</div>
+
+          <div class="sw-row-label">Cyber Security</div>
+          <div class="sw-cell l1">18</div><div class="sw-cell l2">32</div><div class="sw-cell l3">58</div><div class="sw-cell l4">78</div><div class="sw-cell l5">92</div><div class="sw-cell l5">94</div><div class="sw-cell l3">61</div><div class="sw-cell l2">38</div>
+
+          <div class="sw-row-label">Cloud · AWS/Azure</div>
+          <div class="sw-cell l2">38</div><div class="sw-cell l3">61</div><div class="sw-cell l3">66</div><div class="sw-cell l4">78</div><div class="sw-cell l3">68</div><div class="sw-cell l3">55</div><div class="sw-cell l2">42</div><div class="sw-cell l2">35</div>
+
+          <div class="sw-row-label">SAP · Cert Tracks</div>
+          <div class="sw-cell l1">22</div><div class="sw-cell l1">26</div><div class="sw-cell l2">38</div><div class="sw-cell l3">58</div><div class="sw-cell l4">72</div><div class="sw-cell l4">76</div><div class="sw-cell l3">62</div><div class="sw-cell l2">44</div>
+
+          <div class="sw-row-label">Aptitude / Soft</div>
+          <div class="sw-cell l0">8</div><div class="sw-cell l1">19</div><div class="sw-cell l2">34</div><div class="sw-cell l3">56</div><div class="sw-cell l2">42</div><div class="sw-cell l1">25</div><div class="sw-cell l1">17</div><div class="sw-cell l0">9</div>
+
+          <div class="sw-row-label">Data Analytics</div>
+          <div class="sw-cell l1">21</div><div class="sw-cell l2">35</div><div class="sw-cell l2">48</div><div class="sw-cell l3">62</div><div class="sw-cell l3">67</div><div class="sw-cell l3">59</div><div class="sw-cell l2">41</div><div class="sw-cell l1">26</div>
+
+          <div class="sw-row-label">DevOps · CI/CD</div>
+          <div class="sw-cell l1">17</div><div class="sw-cell l2">29</div><div class="sw-cell l2">42</div><div class="sw-cell l3">55</div><div class="sw-cell l3">61</div><div class="sw-cell l2">44</div><div class="sw-cell l1">28</div><div class="sw-cell l1">21</div>
+        </div>
+      </div>
+
+      <!-- Forecast row -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-h" style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div class="card-title">FY27 Capacity Forecast · Quarterly</div>
+            <div class="card-sub">Demand vs internal pool · model-projected (81% accuracy)</div>
+          </div>
+          <span style="font:700 10px/1 var(--mono);color:var(--text-muted)">As of 22 May 2026 · 14:18 IST</span>
+        </div>
+        <div class="forecast-row">
+          <div class="fc-card now">
+            <div class="fc-q">CURRENT · MAY 26</div>
+            <div class="fc-v">147 / 86</div>
+            <div class="fc-d">Live</div>
+          </div>
+          <div class="fc-card">
+            <div class="fc-q">Q1 · JUN–AUG 26</div>
+            <div class="fc-v warn">162 / 86</div>
+            <div class="fc-d">+ 18 hire need</div>
+          </div>
+          <div class="fc-card">
+            <div class="fc-q">Q2 · SEP–NOV 26</div>
+            <div class="fc-v">138 / 92</div>
+            <div class="fc-d">Hiring catches up</div>
+          </div>
+          <div class="fc-card">
+            <div class="fc-q">Q3 · DEC 26 – FEB 27</div>
+            <div class="fc-v ok">118 / 96</div>
+            <div class="fc-d">Balanced</div>
+          </div>
+          <div class="fc-card">
+            <div class="fc-q">Q4 · MAR–MAY 27</div>
+            <div class="fc-v crit">194 / 96</div>
+            <div class="fc-d">EOFY semester peak</div>
+          </div>
+          <div class="fc-card">
+            <div class="fc-q">FY28 H1</div>
+            <div class="fc-v warn">170 / 110</div>
+            <div class="fc-d">Hire plan locked</div>
+          </div>
+        </div>
+      </div>
+
