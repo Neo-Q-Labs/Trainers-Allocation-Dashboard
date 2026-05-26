@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar.jsx';
-import Topbar from './components/Topbar.jsx';
 import PageHead from './components/PageHead.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import CmdK from './components/CmdK.jsx';
@@ -16,7 +15,7 @@ import Pending from './pages/Pending.jsx';
 import Matrix from './pages/Matrix.jsx';
 import Clients from './pages/Clients.jsx';
 import Conflicts from './pages/Conflicts.jsx';
-import Trainers from './pages/Trainers.jsx';
+import Oasis from './pages/Oasis.jsx';
 
 import { initApp } from './lib/setup.js';
 
@@ -51,7 +50,6 @@ export default function App() {
         <Sidebar activePanel={activePanel} onNavigate={navigate} onOpenCmdk={openCmdk} />
 
         <main className="main">
-          <Topbar />
           <PageHead activePanel={activePanel} onNewRequirement={() => setSimOpen(true)} />
 
           <Overview active={activePanel === 'overview'} />
@@ -61,7 +59,7 @@ export default function App() {
           <Matrix active={activePanel === 'matrix'} />
           <Clients active={activePanel === 'clients'} />
           <Conflicts active={activePanel === 'conflicts'} />
-          <Trainers active={activePanel === 'trainers'} />
+          <Oasis active={activePanel === 'oasis'} />
         </main>
       </div>
 

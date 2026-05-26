@@ -1,4 +1,5 @@
 import { PANEL_META } from '../data/navigation.js';
+import SyncButton from './SyncButton.jsx';
 
 export default function PageHead({ activePanel, onNewRequirement }) {
   const meta = PANEL_META[activePanel] || PANEL_META.overview;
@@ -16,6 +17,7 @@ export default function PageHead({ activePanel, onNewRequirement }) {
         </div>
       </div>
       <div className="page-head-right">
+        <SyncButton />
         <button className="btn-ghost">
           <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

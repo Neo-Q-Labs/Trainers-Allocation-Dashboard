@@ -36,7 +36,7 @@ export const api = createApi({
   tagTypes: ['sync', 'date-blocking', 'availability', 'trainers', 'deliveries',
              'conflicts', 'kpis', 'pending', 'workload', 'clients',
              'calendar', 'calendar-metrics', 'request-track', 'master-data',
-             'health'],
+             'health', 'oasis-options'],
   keepUnusedDataFor: ONE_HOUR,
   refetchOnMountOrArgChange: false,
   refetchOnFocus: false,
@@ -59,6 +59,22 @@ export const api = createApi({
     simulateRequirement: build.mutation({
       query: (body) => ({
         url: '/simulate-requirement',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    // ---- OASIS · Opportunity Assessment ----
+    // Vocabulary for the OASIS form dropdowns (clients + primary tracks),
+    // sourced from Request ID Track + Trainer Data Live.
+    getOasisOptions: build.query({
+      query: () => '/oasis/options',
+      providesTags: ['sync', 'oasis-options'],
+    }),
+    // Full assessment — returns ranked candidates + bucket counts.
+    assessOpportunity: build.mutation({
+      query: (body) => ({
+        url: '/oasis/assess',
         method: 'POST',
         body,
       }),
@@ -162,6 +178,8 @@ export const {
   useGetMasterDataQuery,
   useGetRequestTrackQuery,
   useGetAvailabilityQuery,
+  useGetOasisOptionsQuery,
+  useAssessOpportunityMutation,
 } = api;
 
 // One-shot health probe used by the Sync button to surface the live-sheet

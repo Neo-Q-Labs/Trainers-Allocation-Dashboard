@@ -55,10 +55,10 @@ export const NAV_ITEMS = [
   },
   { divider: true },
   {
-    target: 'trainers',
-    tip: 'Trainer Roster',
+    target: 'oasis',
+    tip: 'OASIS · Opportunity Assessment',
     icon: svgWrap(
-      '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><rect x="14" y="2" width="8" height="5" rx="1"/><line x1="16" y1="4.5" x2="20" y2="4.5"/>'
+      '<path d="M21 12a9 9 0 1 1-9-9"/><polyline points="21 4 21 12 13 12"/><circle cx="12" cy="12" r="3"/>'
     )
   }
 ];
@@ -69,7 +69,7 @@ const sw = (inner) =>
 export const PANEL_META = {
   overview: {
     crumb: 'Swift Ops / Planning / Dashboard',
-    title: 'Trainer Capacity Planner',
+    title: 'Dashboard',
     icon: sw(
       '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
     )
@@ -112,11 +112,11 @@ export const PANEL_META = {
       '<path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/>'
     )
   },
-  trainers: {
-    crumb: 'Swift Ops / People / Trainer Roster',
-    title: 'Trainer Data Live',
+  oasis: {
+    crumb: 'Swift Ops / Planning / OASIS',
+    title: 'OASIS · Opportunity Assessment',
     icon: sw(
-      '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><rect x="14" y="2" width="8" height="5" rx="1"/><line x1="16" y1="4.5" x2="20" y2="4.5"/>'
+      '<path d="M21 12a9 9 0 1 1-9-9"/><polyline points="21 4 21 12 13 12"/><circle cx="12" cy="12" r="3"/>'
     )
   }
 };

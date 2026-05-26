@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.cache.store import cache
 from app.config import settings
-from app.routers import availability, calendar, clients, conflicts, date_blocking, deliveries, kpis, pending, workload, trainers, master, request_track, archive, simulator
+from app.routers import availability, calendar, clients, conflicts, date_blocking, deliveries, kpis, pending, workload, trainers, master, request_track, archive, simulator, oasis
 from app.scheduler import shutdown_scheduler, start_scheduler
 
 
@@ -49,6 +49,7 @@ app.include_router(request_track.router, prefix="/api/v1", tags=["Request Track"
 app.include_router(archive.router, prefix="/api/v1", tags=["Archive"])
 app.include_router(date_blocking.router, prefix="/api/v1", tags=["Date Blocking"])
 app.include_router(simulator.router, prefix="/api/v1", tags=["Simulator"])
+app.include_router(oasis.router, prefix="/api/v1", tags=["OASIS"])
 
 
 @app.get("/")
