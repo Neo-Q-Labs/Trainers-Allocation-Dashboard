@@ -1,6 +1,6 @@
 import { PANEL_META } from '../data/navigation.js';
 
-export default function PageHead({ activePanel, onOpenCmdk }) {
+export default function PageHead({ activePanel, onNewRequirement }) {
   const meta = PANEL_META[activePanel] || PANEL_META.overview;
   return (
     <div className="page-head">
@@ -16,20 +16,6 @@ export default function PageHead({ activePanel, onOpenCmdk }) {
         </div>
       </div>
       <div className="page-head-right">
-        <div className="range-segment">
-          <button>7D</button>
-          <button className="active">1M</button>
-          <button>3M</button>
-          <button>FY27</button>
-        </div>
-        <button className="btn-ghost" id="cmdkTriggerBtn" onClick={onOpenCmdk}>
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="7" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          Search
-          <span className="kbd-inline">⌘K</span>
-        </button>
         <button className="btn-ghost">
           <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -38,7 +24,14 @@ export default function PageHead({ activePanel, onOpenCmdk }) {
           </svg>
           Export
         </button>
-        <button className="btn-primary">
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNewRequirement?.();
+          }}
+        >
           <svg
             viewBox="0 0 24 24"
             fill="none"

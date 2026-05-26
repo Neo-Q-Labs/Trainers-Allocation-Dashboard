@@ -1,6 +1,89 @@
-import { conflictKpis, activeConflicts, conflictProneDays, resolutionLogs, crossSkillsMap } from '../data/conflicts.js';
+import { useMemo } from 'react';
+import { useGetConflictsQuery } from '../store/api.js';
+import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
+
+/**
+ * crossSkillsMap is kept static — the Excel data doesn't contain a skill
+ * compatibility matrix. This can be replaced once a skill-mapping layer exists.
+ */
+const crossSkillsMap = [
+  { path: 'Java → Python', desc: '12 trainers cross-certified', percent: 62, barClass: 'mid' },
+  { path: 'Cloud → DevOps', desc: '8 trainers can switch', percent: 48, barClass: 'warn' },
+  { path: 'Testing → Agile', desc: '15 trainers dual-track', percent: 78, barClass: 'ok' },
+  { path: 'React → Node', desc: '10 full-stack available', percent: 55, barClass: 'mid' },
+];
+
+/** Map backend kpi_summary → conflictKpis strip shape */
+function mapKpis(summary, total) {
+  return [
+    {
+      label: 'Active Conflicts', value: String(summary.active ?? total ?? 0),
+      iconType: 'conflict', iconBg: 'rgba(239,68,68,0.12)', iconColor: 'var(--neon-red)',
+      iconClass: 'crit', trend: 'Needs immediate action',
+    },
+    {
+      label: 'Resolved (All Time)', value: String(summary.resolved ?? 0),
+      iconType: 'resolved', iconBg: 'rgba(34,211,165,0.12)', iconColor: 'var(--neon-green)',
+      iconClass: 'ok', trend: 'Historical count',
+    },
+    {
+      label: 'Avg Resolution', value: String(summary.avg_resolution_hrs ?? '—'),
+      unit: summary.avg_resolution_hrs != null ? ' hrs' : '',
+      iconType: 'clock', iconBg: 'rgba(6,182,212,0.12)', iconColor: 'var(--cyan)',
+      iconClass: '', trend: 'Time to close a conflict',
+    },
+    {
+      label: 'Pending Action', value: String(summary.pending_action ?? 0),
+      iconType: 'pending', iconBg: 'rgba(245,197,66,0.12)', iconColor: 'var(--neon-yellow)',
+      iconClass: 'warn', trend: 'Awaiting manager decision',
+    },
+    {
+      label: 'Auto-Resolved', value: String(summary.auto_resolved ?? 0),
+      iconType: 'auto', iconBg: 'rgba(168,85,247,0.12)', iconColor: 'var(--neon-purple, #a855f7)',
+      iconClass: '', trend: 'By the engine',
+    },
+  ];
+}
+
+/** Map backend conflict → activeConflicts card shape */
+function mapConflict(c, idx) {
+  const initials = (c.trainer || '??').substring(0, 2).toUpperCase();
+  const d1 = c.delivery_ids?.[0] || 'DEL-?';
+  const d2 = c.delivery_ids?.[1] || 'DEL-?';
+  const camp1 = c.campuses?.[0] || 'Unknown';
+  const camp2 = c.campuses?.[1] || camp1;
+  return {
+    id: idx + 1,
+    cardClass: '',
+    avatar: initials,
+    avatarClass: 'conf',
+    name: c.trainer,
+    meta: `${c.date} · ${c.type === 'double_booked' ? 'Double Booking' : c.type}`,
+    severity: c.severity === 'high' ? 'Critical' : 'Warning',
+    severityClass: c.severity === 'high' ? 'crit' : 'warn',
+    leftLeg: { id: d1, name: camp1, meta: ['Delivery 1'] },
+    rightLeg: { id: d2, name: camp2, meta: ['Delivery 2'] },
+    relation: 'VS',
+    resolveText: c.message || `Assign a replacement for ${d2}`,
+    actions: ['Resolve', 'Escalate', 'Defer'],
+    primaryAction: 'Resolve',
+  };
+}
 
 export default function Conflicts({ active }) {
+  const { data, error, refetch } = useGetConflictsQuery();
+  const totalLabel = String(data?.total_conflicts ?? 0);
+  const kpis = useMemo(
+    () => (data?.kpi_summary ? mapKpis(data.kpi_summary, data?.total_conflicts ?? 0) : null),
+    [data],
+  );
+  const conflicts = useMemo(() => (data?.conflicts ?? []).map(mapConflict), [data]);
+  const proneDays = data?.conflict_prone_days ?? [];
+  const logs = data?.resolution_log ?? [];
+
+  if (error) return <ErrorPanel panelId="conflicts" active={active} error={error?.error || error?.message || 'Unknown error'} onRetry={() => refetch()} />;
+  if (!data || !kpis) return <LoadingPanel panelId="conflicts" active={active} />;
+
   const renderKpiIcon = (type) => {
     switch (type) {
       case 'conflict':
@@ -48,7 +131,7 @@ export default function Conflicts({ active }) {
     <section className={`panel${active ? ' active' : ''}`} data-panel="conflicts">
       {/* KPI strip */}
       <div className="kpi-strip">
-        {conflictKpis.map((kpi, idx) => (
+        {kpis.map((kpi, idx) => (
           <div className="kpi" key={idx}>
             <div className="kpi-icon" style={{ background: kpi.iconBg, color: kpi.iconColor }}>
               {renderKpiIcon(kpi.iconType)}
@@ -73,17 +156,23 @@ export default function Conflicts({ active }) {
               Active Conflicts · Sorted By Severity
             </div>
             <div style={{ display: 'flex', gap: '6px' }}>
-              <span className="chip neutral">ALL · 7</span>
+              <span className="chip neutral">ALL · {totalLabel}</span>
               <span className="chip error">
-                <span className="chip-dot"></span>CRITICAL · 3
+                <span className="chip-dot"></span>CRITICAL · {conflicts.filter(c => c.severity === 'Critical').length}
               </span>
               <span className="chip warn">
-                <span className="chip-dot"></span>WARNING · 4
+                <span className="chip-dot"></span>WARNING · {conflicts.filter(c => c.severity !== 'Critical').length}
               </span>
             </div>
           </div>
 
-          {activeConflicts.map((conf) => (
+          {conflicts.length === 0 && (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>
+              No active conflicts detected.
+            </div>
+          )}
+
+          {conflicts.map((conf) => (
             <div className={`conflict-card ${conf.cardClass}`} key={conf.id}>
               <div className="cc-head">
                 <div className="cc-trainer">
@@ -102,59 +191,22 @@ export default function Conflicts({ active }) {
                 <div className="cc-leg">
                   <div className="cc-leg-id">{conf.leftLeg.id}</div>
                   <div className="cc-leg-name">{conf.leftLeg.name}</div>
-                  <div className="cc-leg-meta">
-                    {conf.leftLeg.meta.map((m, idx) => (
-                      <span key={idx} className={idx === 0 ? "num" : undefined}>
-                        {m}
-                      </span>
-                    ))}
-                  </div>
+                  <div className="cc-leg-meta">{conf.leftLeg.meta.map((m, i) => <span key={i}>{m}</span>)}</div>
                 </div>
                 <div className="cc-vs-icon">{conf.relation}</div>
                 <div className="cc-leg">
                   <div className="cc-leg-id">{conf.rightLeg.id}</div>
                   <div className="cc-leg-name">{conf.rightLeg.name}</div>
-                  <div className="cc-leg-meta">
-                    {conf.rightLeg.meta.map((m, idx) => (
-                      <span key={idx} className={idx === 0 ? "num" : undefined}>
-                        {m}
-                      </span>
-                    ))}
-                  </div>
+                  <div className="cc-leg-meta">{conf.rightLeg.meta.map((m, i) => <span key={i}>{m}</span>)}</div>
                 </div>
               </div>
               <div className="cc-resolve">
-                {conf.id === 1 && (
-                  <div className="cc-resolve-text">
-                    Suggested: Pull <strong>Surya K</strong> to LTIM-Bhub (P0, onsite), backfill SKI-100 with <strong>Vasudevan Badri (neo10371)</strong> + <strong>Bindhiya J (neo10457)</strong>. Skill match <span className="cm">94%</span>. <strong>Confidence 91%</strong>.
-                  </div>
-                )}
-                {conf.id === 2 && (
-                  <div className="cc-resolve-text">
-                    Suggested: Reassign SKI-099 to <strong>Karunya Mohan (neo10396)</strong> — Python skill match <span className="cm">88%</span>, available days 12. Sahil keeps SKG-ML-S5 as Course Owner. <strong>Confidence 84%</strong>.
-                  </div>
-                )}
-                {conf.id === 3 && (
-                  <div className="cc-resolve-text">
-                    No internal cyber-sec backup available. Suggested: extend LTM-001 by 5 days (no priority loss) so YK finishes SKG-CS-S6 first. Alternative: <strong>raise freelancer request</strong> for CySec mid-level. <strong>Confidence 67%</strong>.
-                  </div>
-                )}
-                {conf.id === 4 && (
-                  <div className="cc-resolve-text">
-                    Long-duration program (16 wks). Suggested: pair Anshul with <strong>Abinaya P (neo10400)</strong> as primary instructor + Anshul as TA-lead for first 4 wks, ramp to co-lead. Reduces single-skill risk. <strong>Confidence 79%</strong>.
-                  </div>
-                )}
-                {conf.id === 5 && (
-                  <div className="cc-resolve-text">
-                    Skill alignment <span className="cm">91%</span>. Move Abinaya to REC-001 with <strong>Bindhiya J</strong> + <strong>2 freelancers</strong>. Frees freelancer budget. <strong>Confidence 86%</strong>.
-                  </div>
-                )}
+                <div className="cc-resolve-text">
+                  <strong>Suggestion:</strong> {conf.resolveText}
+                </div>
                 <div className="cc-actions">
-                  {conf.actions.map((act, actIdx) => (
-                    <button
-                      key={actIdx}
-                      className={`cc-btn ${act === conf.primaryAction ? 'primary' : ''}`}
-                    >
+                  {conf.actions.map((act) => (
+                    <button key={act} className={`cc-btn ${act === conf.primaryAction ? 'primary' : ''}`}>
                       {act}
                     </button>
                   ))}
@@ -164,12 +216,17 @@ export default function Conflicts({ active }) {
           ))}
         </div>
 
-        {/* Right: Conflict-prone days + Resolution log */}
+        {/* Right: Conflict-prone days + Resolution log + Cross-skill map */}
         <div className="conflict-aside">
           <div className="conf-mini-card">
             <div className="cmh-title">Conflict-Prone Days · Next 30</div>
             <div className="confdays-list">
-              {conflictProneDays.map((cDay, idx) => (
+              {proneDays.length === 0 && (
+                <div style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '8px 0' }}>
+                  No high-risk days detected.
+                </div>
+              )}
+              {proneDays.map((cDay, idx) => (
                 <div className={`confday-row ${cDay.severity}`} key={idx}>
                   <span className="d">{cDay.day}</span>
                   <span className="lab">{cDay.desc}</span>
@@ -182,45 +239,18 @@ export default function Conflicts({ active }) {
           <div className="conf-mini-card">
             <div className="cmh-title">Resolution Log · Last 48 Hrs</div>
             <div className="timeline-log">
-              {resolutionLogs.map((log, idx) => (
+              {logs.length === 0 && (
+                <div style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '8px 0' }}>
+                  No resolution history yet.
+                </div>
+              )}
+              {logs.map((log, idx) => (
                 <div className="tl-row" key={idx}>
-                  <span className="ts">{log.time}</span>
-                  {idx === 0 && (
-                    <span className="msg">
-                      <span className={`tag ${log.statusClass}`}>{log.status}</span>
-                      <strong>Aravindhan S</strong> moved KCT-008 → KCT-009. Auto-suggested, accepted.
-                    </span>
-                  )}
-                  {idx === 1 && (
-                    <span className="msg">
-                      <span className={`tag ${log.statusClass}`}>{log.status}</span>
-                      Hire request for <strong>SDET-Java</strong> raised to HR — JD ref HR-2026-0411.
-                    </span>
-                  )}
-                  {idx === 2 && (
-                    <span className="msg">
-                      <span className={`tag ${log.statusClass}`}>{log.status}</span>
-                      YK travel clash to <strong>Poomanirajan M</strong> for L1 review.
-                    </span>
-                  )}
-                  {idx === 3 && (
-                    <span className="msg">
-                      <span className={`tag ${log.statusClass}`}>{log.status}</span>
-                      Manoj Kumar reassigned from Parul-134 (closed) to KCT-009.
-                    </span>
-                  )}
-                  {idx === 4 && (
-                    <span className="msg">
-                      <span className={`tag ${log.statusClass}`}>{log.status}</span>
-                      <strong>2 freelancers</strong> onboarded against Cloud Azure .Net gap.
-                    </span>
-                  )}
-                  {idx === 5 && (
-                    <span className="msg">
-                      <span className={`tag ${log.statusClass}`}>{log.status}</span>
-                      SAP S/4HANA QC gap covered by Karan + Sai Deepak D Y rotation.
-                    </span>
-                  )}
+                  <span className="ts">{log.time || log.timestamp}</span>
+                  <span className="msg">
+                    <span className={`tag ${log.statusClass || log.status}`}>{log.status}</span>
+                    {log.message || log.text}
+                  </span>
                 </div>
               ))}
             </div>
