@@ -171,7 +171,7 @@ function SearchSelect({ label, value, options, onChange, placeholder = 'All' }) 
   );
 }
 
-export default function Requirements({ active }) {
+export default function Requirements({ active, onNewRequirement }) {
   const { data, error, isLoading, refetch } = useGetRequestTrackQuery({ limit: 500 });
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -367,6 +367,41 @@ export default function Requirements({ active }) {
               disabled={!filtered.length}
               label={`Export (${filtered.length})`}
             />
+            {onNewRequirement && (
+              <button
+                type="button"
+                className="btn-primary"
+                style={{
+                  borderRadius: '100px',
+                  padding: '5px 14px',
+                  height: '30px',
+                  font: '800 10.5px/1 var(--font)',
+                  letterSpacing: '0.04em',
+                  boxShadow: 'none',
+                  animation: 'none',
+                  flexShrink: 0
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewRequirement();
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="12"
+                  height="12"
+                  fill="none"
+                  strokeWidth="2.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ marginRight: '4px', stroke: 'currentColor' }}
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New Requirement
+              </button>
+            )}
           </div>
         </header>
 

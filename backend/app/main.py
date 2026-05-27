@@ -3,13 +3,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 # pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.cache.store import cache
 from app.config import settings
-from app.routers import availability, calendar, clients, conflicts, date_blocking, deliveries, kpis, pending, workload, trainers, master, request_track, archive, simulator, oasis
+from app.auth_utils import get_current_user
+from app.routers import availability, calendar, clients, conflicts, date_blocking, deliveries, kpis, pending, workload, trainers, master, request_track, archive, simulator, oasis, auth
 from app.scheduler import shutdown_scheduler, start_scheduler
 
 
@@ -30,26 +31,31 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
 )
 
-app.include_router(kpis.router, prefix="/api/v1", tags=["KPIs"])
-app.include_router(availability.router, prefix="/api/v1", tags=["Availability"])
-app.include_router(deliveries.router, prefix="/api/v1", tags=["Deliveries"])
-app.include_router(conflicts.router, prefix="/api/v1", tags=["Conflicts"])
-app.include_router(pending.router, prefix="/api/v1", tags=["Pending"])
-app.include_router(workload.router, prefix="/api/v1", tags=["Workload"])
-app.include_router(clients.router, prefix="/api/v1", tags=["Clients"])
-app.include_router(calendar.router, prefix="/api/v1", tags=["Calendar"])
-app.include_router(trainers.router, prefix="/api/v1", tags=["Trainers"])
-app.include_router(master.router, prefix="/api/v1", tags=["Master Data"])
-app.include_router(request_track.router, prefix="/api/v1", tags=["Request Track"])
-app.include_router(archive.router, prefix="/api/v1", tags=["Archive"])
-app.include_router(date_blocking.router, prefix="/api/v1", tags=["Date Blocking"])
-app.include_router(simulator.router, prefix="/api/v1", tags=["Simulator"])
-app.include_router(oasis.router, prefix="/api/v1", tags=["OASIS"])
+# Public Auth Router
+app.include_router(auth.router, prefix="/api/v1")
+
+# Protected Dashboard Routers
+app.include_router(kpis.router, prefix="/api/v1", tags=["KPIs"], dependencies=[Depends(get_current_user)])
+app.include_router(availability.router, prefix="/api/v1", tags=["Availability"], dependencies=[Depends(get_current_user)])
+app.include_router(deliveries.router, prefix="/api/v1", tags=["Deliveries"], dependencies=[Depends(get_current_user)])
+app.include_router(conflicts.router, prefix="/api/v1", tags=["Conflicts"], dependencies=[Depends(get_current_user)])
+app.include_router(pending.router, prefix="/api/v1", tags=["Pending"], dependencies=[Depends(get_current_user)])
+app.include_router(workload.router, prefix="/api/v1", tags=["Workload"], dependencies=[Depends(get_current_user)])
+app.include_router(clients.router, prefix="/api/v1", tags=["Clients"], dependencies=[Depends(get_current_user)])
+app.include_router(calendar.router, prefix="/api/v1", tags=["Calendar"], dependencies=[Depends(get_current_user)])
+app.include_router(trainers.router, prefix="/api/v1", tags=["Trainers"], dependencies=[Depends(get_current_user)])
+app.include_router(master.router, prefix="/api/v1", tags=["Master Data"], dependencies=[Depends(get_current_user)])
+app.include_router(request_track.router, prefix="/api/v1", tags=["Request Track"], dependencies=[Depends(get_current_user)])
+app.include_router(archive.router, prefix="/api/v1", tags=["Archive"], dependencies=[Depends(get_current_user)])
+app.include_router(date_blocking.router, prefix="/api/v1", tags=["Date Blocking"], dependencies=[Depends(get_current_user)])
+app.include_router(simulator.router, prefix="/api/v1", tags=["Simulator"], dependencies=[Depends(get_current_user)])
+app.include_router(oasis.router, prefix="/api/v1", tags=["OASIS"], dependencies=[Depends(get_current_user)])
+
 
 
 @app.get("/")

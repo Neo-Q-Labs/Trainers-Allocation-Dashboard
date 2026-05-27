@@ -23,8 +23,18 @@ class Settings(BaseSettings):
     REQUEST_TRACK_SHEET: str = "Request ID Track"
     ARCHIVE_SHEET: str = "Archeive"
     POLL_INTERVAL_SECONDS: int = 300
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = "*"
     LOCAL_CSV_PATH: str = str(ROOT_DIR / "Trainer_Tracker_Live(Allotment Data).csv")
+
+    # MongoDB connection settings
+    MONGODB_URI: str = ""
+    MONGODB_DB_NAME: str = "timesheet"
+
+    # JWT Authentication settings
+    JWT_SECRET_KEY: str = "a_very_secure_random_hex_string_here"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
 
     @property
     def cors_origins_list(self) -> list[str]:

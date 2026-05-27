@@ -73,7 +73,7 @@ export function ErrorPanel({ panelId, active, error, onRetry }) {
         </div>
         <div style={{ fontSize: '12px', maxWidth: '400px', lineHeight: 1.6 }}>
           {error || 'Could not reach the backend API.'}<br />
-          <span style={{ opacity: 0.7 }}>Ensure FastAPI is running on localhost:8000</span>
+          <span style={{ opacity: 0.7 }}>Ensure the FastAPI backend service is running and accessible.</span>
         </div>
         {onRetry && (
           <button

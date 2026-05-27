@@ -13,7 +13,8 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
    /api/v1/* routes.
    ============================================================ */
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_ROOT = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = `${API_ROOT}/api/v1`;
 
 // Default: keep cached data for an hour so cross-page navigation never
 // triggers a refetch on its own. Refetch happens only when the user clicks
@@ -27,9 +28,31 @@ const qs = (params = {}) => {
   return '?' + new URLSearchParams(Object.fromEntries(entries)).toString();
 };
 
+const baseQuery = fetchBaseQuery({
+  baseUrl: API_BASE,
+  prepareHeaders: (headers) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    return headers;
+  },
+});
+
+const baseQueryWithReauth = async (args, api, extraOptions) => {
+  let result = await baseQuery(args, api, extraOptions);
+  if (result.error && result.error.status === 401) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.dispatchEvent(new Event('auth-logout'));
+  }
+  return result;
+};
+
 export const api = createApi({
   reducerPath: 'api',
-  baseQuery: fetchBaseQuery({ baseUrl: API_BASE }),
+  baseQuery: baseQueryWithReauth,
+
   // Single shared tag — the Sync button invalidates this and every
   // endpoint below refetches. Individual endpoints can still be
   // invalidated/refetched on their own via their own tag.
@@ -42,6 +65,19 @@ export const api = createApi({
   refetchOnFocus: false,
   refetchOnReconnect: false,
   endpoints: (build) => ({
+    // ---- Auth ----
+    login: build.mutation({
+      query: (credentials) => ({
+        url: '/auth/login',
+        method: 'POST',
+        body: credentials,
+      }),
+    }),
+    getMe: build.query({
+      query: () => '/auth/me',
+      providesTags: ['sync'],
+    }),
+
     // ---- Overview / Date-Wise Blocking ----
     getDateBlocking: build.query({
       query: ({ start_date, end_date } = {}) =>
@@ -180,12 +216,14 @@ export const {
   useGetAvailabilityQuery,
   useGetOasisOptionsQuery,
   useAssessOpportunityMutation,
+  useLoginMutation,
+  useGetMeQuery,
 } = api;
 
 // One-shot health probe used by the Sync button to surface the live-sheet
 // snapshot timestamp from the FastAPI backend.
 export async function fetchHealth() {
-  const res = await fetch('http://localhost:8000/health');
+  const res = await fetch(`${API_ROOT}/health`);
   if (!res.ok) throw new Error(`Health ${res.status}`);
   return res.json();
 }

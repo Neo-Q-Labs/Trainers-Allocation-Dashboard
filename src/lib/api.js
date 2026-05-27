@@ -4,15 +4,28 @@
  * source of truth and error handling is consistent.
  */
 
-const API_BASE = "http://localhost:8000/api/v1";
+const API_ROOT = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = `${API_ROOT}/api/v1`;
 
 async function apiFetch(path) {
-  const res = await fetch(`${API_BASE}${path}`);
+  const headers = {};
+  const token = localStorage.getItem('token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}${path}`, { headers });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.dispatchEvent(new Event('auth-logout'));
+    throw new Error('Unauthorized');
+  }
   if (!res.ok) {
     throw new Error(`API ${res.status} on ${path}`);
   }
   return res.json();
 }
+
 
 /** GET /api/v1/kpis — Overview KPI strip */
 export const fetchKpis = () => apiFetch("/kpis");
@@ -138,11 +151,22 @@ export const fetchAvailabilityForDate = (date) =>
  * @param {Object} payload  { client, tech_stack, start_date, end_date, demand }
  */
 export const simulateRequirement = async (payload) => {
+  const headers = { "Content-Type": "application/json" };
+  const token = localStorage.getItem('token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const res = await fetch(`${API_BASE}/simulate-requirement`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.dispatchEvent(new Event('auth-logout'));
+    throw new Error('Unauthorized');
+  }
   if (!res.ok) {
     throw new Error(`API ${res.status} on /simulate-requirement`);
   }
@@ -151,5 +175,5 @@ export const simulateRequirement = async (payload) => {
 
 /** GET /health — Backend health check */
 export const fetchHealth = () =>
-  fetch("http://localhost:8000/health").then((r) => r.json());
+  fetch(`${API_ROOT}/health`).then((r) => r.json());
 

@@ -3,6 +3,7 @@ import { useGetTrainersQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
 import ExportButton from '../components/ExportButton.jsx';
+import SyncButton from '../components/SyncButton.jsx';
 import { exportToExcel } from '../lib/exportExcel.js';
 
 /* ============================================================
@@ -518,11 +519,14 @@ export default function Matrix({ active }) {
                 </div>
               )}
             </div>
-            <ExportButton
-              onClick={handleExport}
-              disabled={!gridRows.length}
-              label={`Export (${gridRows.length})`}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <SyncButton />
+              <ExportButton
+                onClick={handleExport}
+                disabled={!gridRows.length}
+                label={`Export (${gridRows.length})`}
+              />
+            </div>
           </div>
         </header>
 

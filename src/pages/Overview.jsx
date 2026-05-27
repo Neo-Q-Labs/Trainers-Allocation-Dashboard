@@ -7,6 +7,7 @@ import {
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
 import ExportButton from '../components/ExportButton.jsx';
+import SyncButton from '../components/SyncButton.jsx';
 import { exportToExcel } from '../lib/exportExcel.js';
 
 import KpiStrip            from '../components/dash/KpiStrip.jsx';
@@ -188,11 +189,14 @@ export default function Overview({ active }) {
           defaultStart={defaultStart} defaultEnd={defaultEnd}
           onApply={(s, e) => { setRangeStart(s); setRangeEnd(e); }}
         />
-        <ExportButton
-          onClick={handleExport}
-          disabled={!rtRows.length && !chartData.length}
-          label="Export"
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <SyncButton />
+          <ExportButton
+            onClick={handleExport}
+            disabled={!rtRows.length && !chartData.length}
+            label="Export"
+          />
+        </div>
       </div>
 
       {/* ----- KPI strip ----- */}
