@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     ARCHIVE_SHEET: str = "Archeive"
     POLL_INTERVAL_SECONDS: int = 300
     CORS_ORIGINS: str = "*"
-    LOCAL_CSV_PATH: str = str(ROOT_DIR / "Trainer_Tracker_Live(Allotment Data).csv")
 
     # MongoDB connection settings
     MONGODB_URI: str = ""

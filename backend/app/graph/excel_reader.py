@@ -21,7 +21,6 @@ from app.parser.allotment_parser import (
     merge_sheet_rows,
     parse_excel_rows,
     parse_generic_sheet,
-    read_csv_rows,
 )
 from app.parser.trainer_parser import parse_trainer_sheet
 
@@ -128,35 +127,26 @@ def _build_payload(
 # ---------------------------------------------------------------------------
 
 def fetch_and_refresh() -> None:
-    source = "graph"
-    graph_error: str | None = None
-
     if not settings.graph_configured:
-        graph_error = "Graph credentials are not configured."
-        logger.warning("Graph refresh skipped; using local CSV fallback.")
-        allotment_rows = read_csv_rows(settings.LOCAL_CSV_PATH)
-        trainer_rows: list[list[Any]] = []
-        master_rows: list[list[Any]] = []
-        request_track_rows: list[list[Any]] = []
-        archive_rows: list[list[Any]] = []
-        source = "local_csv"
-    else:
-        try:
-            token = get_access_token()
-            allotment_rows = fetch_excel_rows()
-            trainer_rows = _fetch_auxiliary_sheet(settings.TRAINER_SHEET, token)
-            master_rows = _fetch_auxiliary_sheet(settings.MASTER_SHEET, token)
-            request_track_rows = _fetch_auxiliary_sheet(settings.REQUEST_TRACK_SHEET, token)
-            archive_rows = _fetch_auxiliary_sheet(settings.ARCHIVE_SHEET, token)
-        except Exception as exc:
-            graph_error = str(exc)
-            logger.warning("Graph refresh failed; using local CSV fallback: %s", exc)
-            allotment_rows = read_csv_rows(settings.LOCAL_CSV_PATH)
-            trainer_rows = []
-            master_rows = []
-            request_track_rows = []
-            archive_rows = []
-            source = "local_csv"
+        logger.error(
+            "Graph credentials are not configured — refresh skipped. "
+            "Set AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, "
+            "SHAREPOINT_DRIVE_ID, and EXCEL_FILE_ID in your .env file."
+        )
+        cache.error = "Graph credentials not configured."
+        return
+
+    try:
+        token = get_access_token()
+        allotment_rows = fetch_excel_rows()
+        trainer_rows = _fetch_auxiliary_sheet(settings.TRAINER_SHEET, token)
+        master_rows = _fetch_auxiliary_sheet(settings.MASTER_SHEET, token)
+        request_track_rows = _fetch_auxiliary_sheet(settings.REQUEST_TRACK_SHEET, token)
+        archive_rows = _fetch_auxiliary_sheet(settings.ARCHIVE_SHEET, token)
+    except Exception as exc:
+        logger.error("Graph refresh failed — cache not updated: %s", exc)
+        cache.error = str(exc)
+        return
 
     payload = _build_payload(
         allotment_rows,
@@ -165,4 +155,4 @@ def fetch_and_refresh() -> None:
         request_track_rows,
         archive_rows,
     )
-    cache.set_all(payload, source=source, error=graph_error)
+    cache.set_all(payload, source="graph", error=None)
