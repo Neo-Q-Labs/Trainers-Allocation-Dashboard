@@ -25,7 +25,6 @@ function Card({ label, value, unit, sub, tone = 'default', icon, danger }) {
 
 export default function KpiStrip({ kpis = {}, pending = {} }) {
   const slots = pending?.slots || [];
-  const trainersRequired = slots.reduce((s, p) => s + (Number(p.total) || 0), 0);
   const openGap = kpis.open_gap ?? slots.reduce((s, p) => s + (Number(p.gap) || 0), 0);
   // High-risk gaps = pending slots where percent < 33 (heavily understaffed).
   const highRisk = slots.filter((p) => (Number(p.percent) || 0) < 33).length;
@@ -48,14 +47,6 @@ export default function KpiStrip({ kpis = {}, pending = {} }) {
         sub={<>↑ <strong>+{Math.max(1, Math.round((kpis.active_requirements || 0) * 0.04))}</strong> this week</>}
         tone="info"
         icon={ICONS.doc}
-      />
-      <Card
-        label="TRAINERS REQUIRED"
-        value={trainersRequired || (kpis.trainers_on_ground ?? 0)}
-        unit="slots"
-        sub={<>↑ <strong>+{Math.max(1, Math.round(trainersRequired * 0.06))}</strong> vs last cycle</>}
-        tone="purple"
-        icon={ICONS.people}
       />
       <Card
         label="ALLOCATION COMPLETE"

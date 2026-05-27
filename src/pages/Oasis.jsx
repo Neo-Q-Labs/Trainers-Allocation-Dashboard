@@ -23,33 +23,14 @@ const toIso = (d) => {
   return `${y}-${m}-${dd}`;
 };
 
-// Quick-range presets — clicking sets the From/To fields. FY27 uses the
-// Indian fiscal calendar (Apr 1 2026 → Mar 31 2027).
-const presetRange = (key) => {
+// Initial period when the user lands on the page = one month from today.
+const defaultRange = () => {
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  if (key === '7D') {
-    const end = new Date(start); end.setDate(end.getDate() + 6);
-    return { from: toIso(start), to: toIso(end) };
-  }
-  if (key === '1M') {
-    const end = new Date(start); end.setMonth(end.getMonth() + 1);
-    return { from: toIso(start), to: toIso(end) };
-  }
-  if (key === '3M') {
-    const end = new Date(start); end.setMonth(end.getMonth() + 3);
-    return { from: toIso(start), to: toIso(end) };
-  }
-  if (key === 'FY27') {
-    return { from: '2026-04-01', to: '2027-03-31' };
-  }
-  return null;
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + 1);
+  return { from: toIso(start), to: toIso(end) };
 };
-
-const PRESET_KEYS = ['7D', '1M', '3M', 'FY27'];
-
-// Initial period when the user lands on the page = 1M from today.
-const defaultRange = () => presetRange('1M');
 
 // Avatar gradient pool — assigned deterministically by name so colours stay
 // stable across re-renders (matches the design palette).
@@ -105,15 +86,6 @@ export default function Oasis({ active }) {
   const [from, setFrom]                 = useState(def.from);
   const [to, setTo]                     = useState(def.to);
   const [trainers, setTrainers]         = useState(5);
-  const [activePreset, setActivePreset] = useState('1M');
-
-  // Drop preset highlight when the user manually edits a date.
-  useEffect(() => {
-    if (!activePreset) return;
-    const pr = presetRange(activePreset);
-    if (!pr) return;
-    if (pr.from !== from || pr.to !== to) setActivePreset(null);
-  }, [from, to, activePreset]);
 
   // ----- Backend integration ------------------------------------------------
   const {
@@ -139,14 +111,6 @@ export default function Oasis({ active }) {
   const dateInvalid = !!from && !!to && from > to;
   const formValid = !!from && !!to && !dateInvalid && Number(trainers) >= 0;
 
-  const handlePreset = (key) => {
-    const pr = presetRange(key);
-    if (!pr) return;
-    setFrom(pr.from);
-    setTo(pr.to);
-    setActivePreset(key);
-  };
-
   const handleSimulate = async () => {
     if (!formValid || assessing) return;
     await assess({
@@ -167,7 +131,6 @@ export default function Oasis({ active }) {
     setFrom(pr.from);
     setTo(pr.to);
     setTrainers(5);
-    setActivePreset('1M');
     resetAssess();
   };
 
@@ -225,36 +188,9 @@ export default function Oasis({ active }) {
 
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel="oasis">
-      {/* OASIS-local sub-toolbar — range presets + search hint + export */}
+      {/* OASIS-local sub-toolbar — export only */}
       <div className="oa-toolbar">
         <div className="oa-toolbar-spacer" />
-        <div className="oa-presets" role="tablist" aria-label="Quick date range">
-          {PRESET_KEYS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              role="tab"
-              aria-selected={activePreset === k}
-              className={`oa-preset${activePreset === k ? ' is-active' : ''}`}
-              onClick={() => handlePreset(k)}
-            >
-              {k}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="oa-tool-btn"
-          onClick={() => window.qlabs?.openCmdk?.()}
-          title="Open command palette"
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          SEARCH
-          <span className="oa-tool-kbd">⌘K</span>
-        </button>
         <button
           type="button"
           className="oa-tool-btn"

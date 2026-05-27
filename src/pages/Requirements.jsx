@@ -1,14 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useGetRequestTrackQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 
 /* ============================================================
-   ALL REQUIREMENTS · table view
+   Requirement — live tabular + Gantt view
    ------------------------------------------------------------
-   Live tabular view of every row in the Request ID Track sheet
-   with status / search / type filters and a TABLE / GANTT
-   toggle. Source: useGetRequestTrackQuery (single shared cache,
-   identical to the Pending Allocations page).
+   Source: Request ID Track sheet (useGetRequestTrackQuery).
+   Fixed-layout table (columns always aligned + fit the panel),
+   searchable Delivery ID / Course / Client dropdown filters,
+   status chips, and a real horizontal Gantt timeline.
    ============================================================ */
 
 const parseNum = (v) => {
@@ -17,22 +17,16 @@ const parseNum = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-// Excel stores dates as days-since 1899-12-30. The sheet sometimes ships ISO
-// strings instead (when the cell has been retyped manually). Handle both.
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
 const MONTHS_3 = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+const MONTHS_CAP = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function parseSheetDate(raw) {
   if (raw == null || raw === '') return null;
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return new Date(EXCEL_EPOCH + raw * 86400000);
-  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) return new Date(EXCEL_EPOCH + raw * 86400000);
   const s = String(raw).trim();
   if (!s) return null;
-  if (/^\d+(\.\d+)?$/.test(s)) {
-    return new Date(EXCEL_EPOCH + Number(s) * 86400000);
-  }
-  // "1/6/2025", "1-Jun-2025", "01-06-2025"
+  if (/^\d+(\.\d+)?$/.test(s)) return new Date(EXCEL_EPOCH + Number(s) * 86400000);
   const m = s.match(/^(\d{1,2})[\s\-/](\d{1,2}|[A-Za-z]{3,9})[\s\-/](\d{2,4})$/);
   if (m) {
     const day = parseInt(m[1], 10);
@@ -48,28 +42,16 @@ function parseSheetDate(raw) {
   return Number.isFinite(ts) ? new Date(ts) : null;
 }
 
-function fmtShort(d) {
-  if (!d) return '—';
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-}
+const fmtShort = (d) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—');
 
-// INTERNAL / FREELANCER / MIXED  — derived from headcount columns. A row with
-// any freelancer headcount AND any internal becomes MIXED; otherwise it leans
-// toward whichever pool actually has people. Empty rows default to INTERNAL.
 function deriveType(row) {
   const internal = parseNum(row['Internal']);
-  const fl =
-    parseNum(row['Existing Freelancers']) +
-    parseNum(row['New Freelancers Hired']) +
-    parseNum(row['New Freelancer Required']);
+  const fl = parseNum(row['Existing Freelancers']) + parseNum(row['New Freelancers Hired']) + parseNum(row['New Freelancer Required']);
   if (internal > 0 && fl > 0) return 'MIXED';
   if (fl > 0 && internal === 0) return 'FREELANCER';
   return 'INTERNAL';
 }
 
-// OPEN / CLOSED / CANCELLED — interpret the live Allocation/Training Status
-// text. Cancellation wins; "closed"/"complete" maps to CLOSED; everything
-// else is OPEN.
 function deriveStatus(row) {
   const a = String(row['Allocation Status'] || '').toLowerCase();
   const t = String(row['Training Status'] || '').toLowerCase();
@@ -83,16 +65,12 @@ function summarise(row) {
   const taReq      = parseNum(row["Total TA's Required"]);
   const required   = trainerReq + taReq;
   const internal   = parseNum(row['Internal']);
-  const fl =
-    parseNum(row['Existing Freelancers']) +
-    parseNum(row['New Freelancers Hired']);
+  const fl = parseNum(row['Existing Freelancers']) + parseNum(row['New Freelancers Hired']);
   const filled = internal + fl;
-  const gap    = Math.max(0, required - filled);
+  const gap = Math.max(0, required - filled);
   return { trainerReq, taReq, required, filled, gap };
 }
 
-// Numeric Risk taken from the sheet's Risk column when populated; otherwise
-// fall back to the gap (so unallocated demand still surfaces as a risk score).
 function deriveRisk(row, gap) {
   const cell = String(row['Risk'] || '').trim();
   const explicit = parseInt(cell.replace(/[^\d]/g, ''), 10);
@@ -104,8 +82,6 @@ const riskTone = (risk) => (risk >= 10 ? 'high' : risk >= 4 ? 'med' : risk > 0 ?
 const STATUS_TONE = { OPEN: 'open', CLOSED: 'closed', CANCELLED: 'cancelled' };
 const TYPE_TONE   = { INTERNAL: 'internal', FREELANCER: 'freelancer', MIXED: 'mixed' };
 
-// "Window" cell: short date range. Falls back gracefully when only one side
-// of the range is present in the sheet.
 function windowLabel(start, end) {
   if (start && end) return `${fmtShort(start)} → ${fmtShort(end)}`;
   if (start) return `from ${fmtShort(start)}`;
@@ -115,13 +91,92 @@ function windowLabel(start, end) {
 
 const STATUS_FILTERS = ['ALL', 'OPEN', 'CLOSED', 'CANCELLED'];
 
+/* ----- Searchable dropdown (app-themed) ----- */
+function SearchSelect({ label, value, options, onChange, placeholder = 'All' }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return options;
+    const needle = q.trim().toLowerCase();
+    return options.filter((o) => o.toLowerCase().includes(needle));
+  }, [options, q]);
+
+  return (
+    <div ref={ref} className={`rq-select${open ? ' is-open' : ''}${value ? ' is-set' : ''}`}>
+      <button type="button" className="rq-select-trigger" onClick={() => setOpen((v) => !v)}>
+        <span className="rq-select-label">{label}</span>
+        <span className="rq-select-value">{value || placeholder}</span>
+        {value ? (
+          <span
+            className="rq-select-clear"
+            role="button"
+            aria-label={`Clear ${label}`}
+            onClick={(e) => { e.stopPropagation(); onChange(''); setQ(''); }}
+          >×</span>
+        ) : (
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rq-select-caret">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        )}
+      </button>
+      {open && (
+        <div className="rq-select-menu">
+          <div className="rq-select-search">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${label.toLowerCase()}…`} />
+          </div>
+          <div className="rq-select-list">
+            <button type="button" className={`rq-select-opt${!value ? ' is-active' : ''}`} onClick={() => { onChange(''); setOpen(false); setQ(''); }}>
+              {placeholder}
+            </button>
+            {filtered.length === 0 ? (
+              <div className="rq-select-empty">No matches</div>
+            ) : (
+              filtered.slice(0, 300).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  className={`rq-select-opt${value === opt ? ' is-active' : ''}`}
+                  onClick={() => { onChange(opt); setOpen(false); setQ(''); }}
+                  title={opt}
+                >
+                  {opt}
+                </button>
+              ))
+            )}
+          </div>
+          <div className="rq-select-foot">{filtered.length} option{filtered.length === 1 ? '' : 's'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Requirements({ active }) {
   const { data, error, isLoading, refetch } = useGetRequestTrackQuery({ limit: 500 });
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [view, setView]                 = useState('TABLE');
+  const [deliveryF, setDeliveryF]       = useState('');
+  const [courseF, setCourseF]           = useState('');
+  const [clientF, setClientF]           = useState('');
 
-  // ----- Normalise live rows -------------------------------------------------
   const rows = useMemo(() => {
     const raw = data?.rows || [];
     const now = new Date();
@@ -148,14 +203,23 @@ export default function Requirements({ active }) {
           gap: summary.gap,
           risk,
           archived,
-          raw: row,
         };
       })
-      // Drop wholly-empty rows that come through as padding
       .filter((r) => r.delivery_id || r.client || r.course);
   }, [data]);
 
-  // Counts — active = end_date >= today (or no end date); archived = past.
+  // Distinct option lists for the searchable dropdowns.
+  const opts = useMemo(() => {
+    const d = new Set(), c = new Set(), cl = new Set();
+    for (const r of rows) {
+      if (r.delivery_id) d.add(r.delivery_id);
+      if (r.course) c.add(r.course);
+      if (r.client) cl.add(r.client);
+    }
+    const sort = (s) => Array.from(s).sort((a, b) => a.localeCompare(b));
+    return { delivery: sort(d), course: sort(c), client: sort(cl) };
+  }, [rows]);
+
   const stats = useMemo(() => ({
     active:   rows.filter((r) => !r.archived).length,
     archived: rows.filter((r) =>  r.archived).length,
@@ -165,6 +229,9 @@ export default function Requirements({ active }) {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      if (deliveryF && r.delivery_id !== deliveryF) return false;
+      if (courseF && r.course !== courseF) return false;
+      if (clientF && r.client !== clientF) return false;
       if (!q) return true;
       return (
         r.delivery_id.toLowerCase().includes(q) ||
@@ -174,146 +241,109 @@ export default function Requirements({ active }) {
         r.subdomain.toLowerCase().includes(q)
       );
     });
-  }, [rows, search, statusFilter]);
+  }, [rows, search, statusFilter, deliveryF, courseF, clientF]);
+
+  const anyFilter = !!(deliveryF || courseF || clientF || search || statusFilter !== 'ALL');
+  const clearAll = () => {
+    setDeliveryF(''); setCourseF(''); setClientF(''); setSearch(''); setStatusFilter('ALL');
+  };
 
   if (error) {
     return (
-      <ErrorPanel
-        panelId="requirements"
-        active={active}
+      <ErrorPanel panelId="requirements" active={active}
         error={error?.error || error?.message || 'Failed to load requirements.'}
-        onRetry={() => refetch()}
-      />
+        onRetry={() => refetch()} />
     );
   }
   if (isLoading && !data) return <LoadingPanel panelId="requirements" active={active} />;
 
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel="requirements">
-      <div className="card ar-card">
-        <header className="ar-head">
-          <div className="ar-head-left">
-            <h2 className="ar-title">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <div className="card rq-card">
+        <header className="rq-head">
+          <div className="rq-head-left">
+            <h2 className="rq-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="8"  y1="13" x2="16" y2="13" />
-                <line x1="8"  y1="17" x2="13" y2="17" />
+                <polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" />
               </svg>
               ALL REQUIREMENTS
             </h2>
-            <div className="ar-subtitle">
-              <strong>{stats.active}</strong> active <span className="ar-dot">·</span> <strong>{stats.archived}</strong> archived
+            <div className="rq-subtitle">
+              <strong>{stats.active}</strong> active <span className="rq-dot">·</span> <strong>{stats.archived}</strong> archived
             </div>
           </div>
-
-          <div className="ar-head-right">
-            <div className="ar-search-wrap">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          <div className="rq-head-right">
+            <div className="rq-search-wrap">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input
-                type="search"
-                className="ar-search"
-                placeholder="Search Delivery ID, client, programme…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button
-                  type="button"
-                  className="ar-search-clear"
-                  onClick={() => setSearch('')}
-                  aria-label="Clear search"
-                >×</button>
-              )}
+              <input type="search" className="rq-search" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              {search && <button type="button" className="rq-search-clear" onClick={() => setSearch('')} aria-label="Clear">×</button>}
             </div>
-
-            <div className="ar-filters" role="tablist" aria-label="Status filter">
-              {STATUS_FILTERS.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  role="tab"
-                  aria-selected={statusFilter === opt}
-                  className={`ar-filter-btn${statusFilter === opt ? ' is-active' : ''}`}
-                  onClick={() => setStatusFilter(opt)}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-
-            <div className="ar-views" role="tablist" aria-label="View mode">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === 'TABLE'}
-                className={`ar-view-btn${view === 'TABLE' ? ' is-active' : ''}`}
-                onClick={() => setView('TABLE')}
-              >TABLE</button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === 'GANTT'}
-                className={`ar-view-btn${view === 'GANTT' ? ' is-active' : ''}`}
-                onClick={() => setView('GANTT')}
-              >GANTT</button>
+            <div className="rq-views" role="tablist">
+              <button type="button" role="tab" aria-selected={view === 'TABLE'} className={`rq-view-btn${view === 'TABLE' ? ' is-active' : ''}`} onClick={() => setView('TABLE')}>TABLE</button>
+              <button type="button" role="tab" aria-selected={view === 'GANTT'} className={`rq-view-btn${view === 'GANTT' ? ' is-active' : ''}`} onClick={() => setView('GANTT')}>GANTT</button>
             </div>
           </div>
         </header>
 
-        {view === 'TABLE' ? (
-          <RequirementsTable rows={filtered} totalRows={rows.length} />
-        ) : (
-          <div className="ar-gantt-empty">
-            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3"  y="5"  width="10" height="3" rx="1" />
-              <rect x="7"  y="11" width="12" height="3" rx="1" />
-              <rect x="5"  y="17" width="8"  height="3" rx="1" />
-            </svg>
-            <div className="ar-gantt-title">Gantt view coming soon</div>
-            <div className="ar-gantt-sub">Switch back to <button className="ar-link" onClick={() => setView('TABLE')}>TABLE</button> for the full list.</div>
+        {/* ----- Filter bar: searchable dropdowns + status chips ----- */}
+        <div className="rq-filters">
+          <SearchSelect label="Delivery ID" value={deliveryF} options={opts.delivery} onChange={setDeliveryF} />
+          <SearchSelect label="Course"      value={courseF}   options={opts.course}   onChange={setCourseF} />
+          <SearchSelect label="Client"      value={clientF}   options={opts.client}   onChange={setClientF} />
+          <div className="rq-status-chips" role="tablist">
+            {STATUS_FILTERS.map((opt) => (
+              <button key={opt} type="button" role="tab" aria-selected={statusFilter === opt}
+                className={`rq-chip${statusFilter === opt ? ' is-active' : ''}`} onClick={() => setStatusFilter(opt)}>
+                {opt}
+              </button>
+            ))}
           </div>
-        )}
+          {anyFilter && (
+            <button type="button" className="rq-clear-all" onClick={clearAll}>Clear filters</button>
+          )}
+        </div>
+
+        {view === 'TABLE'
+          ? <RequirementsTable rows={filtered} totalRows={rows.length} />
+          : <GanttChart rows={filtered} />}
       </div>
     </section>
   );
 }
 
 /* ----- table ----- */
-
 function RequirementsTable({ rows, totalRows }) {
   if (totalRows === 0) {
-    return (
-      <div className="ar-empty">
-        <div className="ar-empty-title">No requirements found</div>
-        <div className="ar-empty-sub">The Request ID Track sheet returned no rows.</div>
-      </div>
-    );
+    return <div className="rq-empty"><div className="rq-empty-title">No requirements found</div><div className="rq-empty-sub">The Request ID Track sheet returned no rows.</div></div>;
   }
   if (rows.length === 0) {
-    return (
-      <div className="ar-empty">
-        <div className="ar-empty-title">No matches</div>
-        <div className="ar-empty-sub">Nothing matches the current filter and search.</div>
-      </div>
-    );
+    return <div className="rq-empty"><div className="rq-empty-title">No matches</div><div className="rq-empty-sub">Nothing matches the current filters.</div></div>;
   }
   return (
-    <div className="ar-table-wrap" role="region" aria-label="Requirements table">
-      <table className="ar-table">
+    <div className="rq-table-wrap">
+      <table className="rq-table">
+        <colgroup>
+          <col style={{ width: '6px' }} />
+          <col style={{ width: '13%' }} />
+          <col style={{ width: '28%' }} />
+          <col style={{ width: '15%' }} />
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '13%' }} />
+        </colgroup>
         <thead>
           <tr>
-            <th className="ar-th-bar" aria-label="status" />
+            <th aria-label="status" />
             <th>Delivery ID</th>
             <th>Course / Client</th>
             <th>Window</th>
             <th>Type</th>
-            <th className="ar-th-num">TAs</th>
-            <th className="ar-th-num">Gap</th>
-            <th className="ar-th-num">Risk</th>
+            <th className="rq-th-num">Trainers</th>
+            <th className="rq-th-num">TAs</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -321,7 +351,7 @@ function RequirementsTable({ rows, totalRows }) {
           {rows.map((r, idx) => <RequirementsRow key={`${r.delivery_id}-${idx}`} row={r} />)}
         </tbody>
       </table>
-      <div className="ar-table-foot">
+      <div className="rq-table-foot">
         Showing <strong>{rows.length}</strong> of <strong>{totalRows}</strong> requirement{totalRows === 1 ? '' : 's'}
       </div>
     </div>
@@ -330,68 +360,132 @@ function RequirementsTable({ rows, totalRows }) {
 
 function RequirementsRow({ row }) {
   const tone = riskTone(row.risk);
-  const riskNum = row.risk > 0 ? row.risk : '—';
-  const riskLabel = tone === 'high' ? 'HIGH' : tone === 'med' ? 'MED' : tone === 'low' ? 'LOW' : '';
-
-  // Subtitle: "Client · Domain[ · Subdomain]" – never start with an orphan dot.
   const subBits = [row.client, row.domain, row.subdomain].filter(Boolean);
   const subtitle = subBits.join(' · ');
+  return (
+    <tr className={`rq-row${row.archived ? ' is-archived' : ''}`}>
+      <td className="rq-cell-bar" aria-hidden="true"><span className={`rq-bar is-${tone}`} /></td>
+      <td className="rq-cell-id"><span className="rq-id" title={row.delivery_id || '—'}>{row.delivery_id || '—'}</span></td>
+      <td className="rq-cell-cc">
+        <div className="rq-cc-title" title={row.course || '—'}>{row.course || row.client || '—'}</div>
+        {subtitle && <div className="rq-cc-sub" title={subtitle}>{subtitle}</div>}
+      </td>
+      <td className="rq-cell-when"><span className="rq-when">{windowLabel(row.start, row.end)}</span></td>
+      <td><span className={`rq-chip rq-chip-${TYPE_TONE[row.type] || 'internal'}`}>{row.type}</span></td>
+      <td className="rq-cell-num"><span className="rq-num">{row.trainer_required > 0 ? row.trainer_required : '—'}</span></td>
+      <td className="rq-cell-num"><span className="rq-num">{row.ta_required > 0 ? row.ta_required : '—'}</span></td>
+      <td><span className={`rq-chip rq-chip-status-${STATUS_TONE[row.status]}`}><span className="rq-dot-mark" />{row.status}</span></td>
+    </tr>
+  );
+}
+
+/* ----- Gantt timeline ----- */
+function GanttChart({ rows }) {
+  const dated = useMemo(() => rows.filter((r) => r.start && r.end && r.end >= r.start), [rows]);
+
+  const domain = useMemo(() => {
+    if (!dated.length) return null;
+    let min = dated[0].start.getTime();
+    let max = dated[0].end.getTime();
+    for (const r of dated) {
+      min = Math.min(min, r.start.getTime());
+      max = Math.max(max, r.end.getTime());
+    }
+    // pad a few days each side for breathing room
+    min -= 2 * 86400000;
+    max += 2 * 86400000;
+    return { min, max, span: Math.max(1, max - min) };
+  }, [dated]);
+
+  // Month gridlines across the domain.
+  const monthMarks = useMemo(() => {
+    if (!domain) return [];
+    const marks = [];
+    const d = new Date(domain.min);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + 1);
+    while (d.getTime() <= domain.max) {
+      const pct = ((d.getTime() - domain.min) / domain.span) * 100;
+      marks.push({ pct, label: `${MONTHS_CAP[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}` });
+      d.setUTCMonth(d.getUTCMonth() + 1);
+    }
+    return marks;
+  }, [domain]);
+
+  const todayPct = useMemo(() => {
+    if (!domain) return null;
+    const t = Date.now();
+    if (t < domain.min || t > domain.max) return null;
+    return ((t - domain.min) / domain.span) * 100;
+  }, [domain]);
+
+  if (!dated.length) {
+    return (
+      <div className="rq-empty">
+        <div className="rq-empty-title">No dated requirements to chart</div>
+        <div className="rq-empty-sub">Rows need both a Program Start &amp; End date to appear on the Gantt.</div>
+      </div>
+    );
+  }
+
+  const sorted = [...dated].sort((a, b) => a.start - b.start);
 
   return (
-    <tr className={`ar-row ar-row-${tone}${row.archived ? ' is-archived' : ''}`}>
-      <td className="ar-cell-bar" aria-hidden="true">
-        <span className={`ar-bar is-${tone}`} />
-      </td>
+    <div className="rq-gantt">
+      <div className="rq-gantt-scroll">
+        <div className="rq-gantt-inner">
+          {/* timeline header */}
+          <div className="rq-gantt-axis">
+            <div className="rq-gantt-axis-label">Delivery</div>
+            <div className="rq-gantt-axis-track">
+              {monthMarks.map((m, i) => (
+                <div key={i} className="rq-gantt-month" style={{ left: `${m.pct}%` }}>
+                  <span className="rq-gantt-month-label">{m.label}</span>
+                </div>
+              ))}
+              {todayPct != null && (
+                <div className="rq-gantt-today" style={{ left: `${todayPct}%` }}><span>TODAY</span></div>
+              )}
+            </div>
+          </div>
 
-      <td className="ar-cell-id">
-        <span className="ar-id" title={row.delivery_id || '—'}>{row.delivery_id || '—'}</span>
-      </td>
-
-      <td className="ar-cell-window">
-        <div className="ar-window-title" title={row.course || '—'}>
-          {row.course || row.client || '—'}
+          {/* rows */}
+          <div className="rq-gantt-rows">
+            {sorted.map((r, idx) => {
+              const left = ((r.start.getTime() - domain.min) / domain.span) * 100;
+              const width = Math.max(1.2, ((r.end.getTime() - r.start.getTime()) / domain.span) * 100);
+              const tone = STATUS_TONE[r.status] || 'open';
+              return (
+                <div key={`${r.delivery_id}-${idx}`} className="rq-gantt-row">
+                  <div className="rq-gantt-row-label" title={`${r.delivery_id} · ${r.course}`}>
+                    <span className="rq-gantt-row-id">{r.delivery_id || '—'}</span>
+                    <span className="rq-gantt-row-course">{r.course || r.client || '—'}</span>
+                  </div>
+                  <div className="rq-gantt-row-track">
+                    {monthMarks.map((m, i) => (
+                      <div key={i} className="rq-gantt-gridline" style={{ left: `${m.pct}%` }} />
+                    ))}
+                    {todayPct != null && <div className="rq-gantt-today-line" style={{ left: `${todayPct}%` }} />}
+                    <div
+                      className={`rq-gantt-bar rq-gantt-bar-${tone}`}
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                      title={`${r.delivery_id} · ${r.course}\n${fmtShort(r.start)} → ${fmtShort(r.end)}\n${r.trainer_required} trainers · ${r.ta_required} TAs · ${r.status}`}
+                    >
+                      <span className="rq-gantt-bar-label">{r.course || r.delivery_id}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
-        {subtitle && (
-          <div className="ar-window-sub" title={subtitle}>{subtitle}</div>
-        )}
-      </td>
-
-      <td className="ar-cell-when">
-        <span className="ar-when">{windowLabel(row.start, row.end)}</span>
-      </td>
-
-      <td>
-        <span className={`ar-chip ar-chip-${TYPE_TONE[row.type] || 'internal'}`}>{row.type}</span>
-      </td>
-
-      <td className="ar-cell-num">
-        <span className="ar-num">{row.ta_required > 0 ? row.ta_required : '—'}</span>
-      </td>
-
-      <td className="ar-cell-num">
-        <span className={`ar-num${row.gap > 0 ? ' is-warn' : ''}`}>
-          {row.gap > 0 ? row.gap : '—'}
-        </span>
-      </td>
-
-      <td className="ar-cell-num">
-        <span className="ar-risk-group">
-          <span className={`ar-num ar-num-risk-${tone}`}>{riskNum}</span>
-          {riskLabel && (
-            <span className={`ar-chip ar-chip-risk-${tone}`}>
-              <span className="ar-dot-mark" />
-              {riskLabel}
-            </span>
-          )}
-        </span>
-      </td>
-
-      <td>
-        <span className={`ar-chip ar-chip-status-${STATUS_TONE[row.status]}`}>
-          <span className="ar-dot-mark" />
-          {row.status}
-        </span>
-      </td>
-    </tr>
+      </div>
+      <div className="rq-gantt-legend">
+        <span className="rq-gantt-leg"><span className="rq-gantt-swatch is-open" /> Open</span>
+        <span className="rq-gantt-leg"><span className="rq-gantt-swatch is-closed" /> Closed</span>
+        <span className="rq-gantt-leg"><span className="rq-gantt-swatch is-cancelled" /> Cancelled</span>
+        <span className="rq-gantt-foot-note">{sorted.length} dated requirement{sorted.length === 1 ? '' : 's'}</span>
+      </div>
+    </div>
   );
 }
