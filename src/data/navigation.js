@@ -30,6 +30,13 @@ export const NAV_ITEMS = [
     badge: 12,
     icon: svgWrap('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>')
   },
+  {
+    target: 'oasis',
+    tip: 'OASIS · Opportunity Assessment',
+    icon: svgWrap(
+      '<path d="M21 12a9 9 0 1 1-9-9"/><polyline points="21 4 21 12 13 12"/><circle cx="12" cy="12" r="3"/>'
+    )
+  },
   { divider: true },
   {
     target: 'matrix',
@@ -51,14 +58,6 @@ export const NAV_ITEMS = [
     badge: 7,
     icon: svgWrap(
       '<path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/>'
-    )
-  },
-  { divider: true },
-  {
-    target: 'oasis',
-    tip: 'OASIS · Opportunity Assessment',
-    icon: svgWrap(
-      '<path d="M21 12a9 9 0 1 1-9-9"/><polyline points="21 4 21 12 13 12"/><circle cx="12" cy="12" r="3"/>'
     )
   }
 ];

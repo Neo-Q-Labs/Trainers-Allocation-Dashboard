@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  useGetCalendarMetricsQuery,
   useGetCalendarDataQuery,
   useGetCalendarWeekQuery,
   useGetCalendarGanttQuery,
@@ -56,68 +55,6 @@ const MONTHS_SHORT = [
 ];
 
 const CAPACITY = 42;
-
-/** Map backend calendar_metrics → calendarMetrics strip shape */
-function mapMetrics(m) {
-  const fmtDate = (iso) => {
-    if (!iso) return '—';
-    try {
-      return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    } catch {
-      return iso;
-    }
-  };
-  return [
-    {
-      num: String(m.trainer_days_next30 ?? 0),
-      lab: 'Trainer-Days (Next 30)',
-      sub: 'Across active assignments',
-      iconType: 'clock',
-      bg: 'rgba(6,182,212,0.12)',
-      color: 'var(--cyan)',
-    },
-    {
-      num: String(m.ta_days_next30 ?? 0),
-      lab: 'TA-Days (Next 30)',
-      sub: 'Teaching Assistants',
-      iconType: 'trainers',
-      bg: 'rgba(168,85,247,0.12)',
-      color: 'var(--neon-purple, #a855f7)',
-    },
-    {
-      num: fmtDate(m.peak_demand_day),
-      lab: 'Peak Demand Day',
-      sub: 'Most assignments on a single day',
-      iconType: 'peak',
-      bg: 'rgba(239,68,68,0.12)',
-      color: 'var(--neon-red)',
-    },
-    {
-      num: String(m.free_slots_next30 ?? 0),
-      lab: 'Free Slots (Next 30)',
-      sub: 'Deliveries without a trainer',
-      iconType: 'free',
-      bg: 'rgba(34,211,165,0.12)',
-      color: 'var(--neon-green)',
-    },
-    {
-      num: String(m.active_pool_size ?? 0),
-      lab: 'Active Pool',
-      sub: 'Trainers with assignments in window',
-      iconType: 'pool',
-      bg: 'rgba(245,197,66,0.12)',
-      color: 'var(--neon-yellow)',
-    },
-    {
-      num: String(m.daily_ceiling ?? 0),
-      lab: 'Daily Ceiling',
-      sub: 'Max assignments on any single day',
-      iconType: 'ceiling',
-      bg: 'rgba(99,102,241,0.12)',
-      color: 'var(--accent-text, #6366f1)',
-    },
-  ];
-}
 
 /** Formatter helper for backend-compatible YYYY-MM-DD keys */
 const key = (d) => {
@@ -178,7 +115,6 @@ export default function Calendar({ active }) {
   // Filter States
   const [trackFilter, setTrackFilter] = useState('all');
   const [clientFilter, setClientFilter] = useState('all');
-  const [showMetrics, setShowMetrics] = useState(true);
 
   // Programme-detail modal (opens when a "Programmes Running This Week" card is clicked)
   const [progDetailId, setProgDetailId] = useState(null);
@@ -196,10 +132,6 @@ export default function Calendar({ active }) {
   const cursorMonth = cursorDate.getMonth();
 
   // ----- Redux-backed queries -----
-  // Calendar metrics — shared by all views.
-  const { data: metricsRaw, error: metricsErr } = useGetCalendarMetricsQuery();
-  const metrics = useMemo(() => (metricsRaw ? mapMetrics(metricsRaw) : null), [metricsRaw]);
-
   // Deliveries — used to enrich the programme-detail modal with status, dates,
   // trainer list, total/filled slots. Already in the global Redux cache.
   const { data: deliveriesData } = useGetDeliveriesQuery({});
@@ -243,7 +175,7 @@ export default function Calendar({ active }) {
   } = useGetCalendarWeekQuery(weekKey, { skip: !active });
 
   const loading = loadingCal || loadingGantt;
-  const error = metricsErr || calErr || ganttErr;
+  const error = calErr || ganttErr;
 
   // Helper to dynamically filter events and demand for any day
   const getFilteredDayData = useCallback((events, demand) => {
@@ -408,51 +340,6 @@ export default function Calendar({ active }) {
       });
   }, [ganttData, ganttSearch, trainerToggle]);
 
-  const renderMetricIcon = (type) => {
-    switch (type) {
-      case 'clock':
-        return (
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><path d="M12 8v4l3 2" />
-          </svg>
-        );
-      case 'trainers':
-        return (
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="9" cy="7" r="4" />
-            <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-          </svg>
-        );
-      case 'peak':
-        return (
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-        );
-      case 'free':
-        return (
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        );
-      case 'pool':
-        return (
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            <polyline points="9 22 9 12 15 12 15 22" />
-          </svg>
-        );
-      case 'ceiling':
-        return (
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 3v18h18" /><path d="m7 14 4-4 4 4 5-5" />
-          </svg>
-        );
-      default:
-        return null;
-    }
-  };
-
   // Generate 42 cells for the selected month grid
   const monthCells = useMemo(() => {
     const y = cursorDate.getFullYear();
@@ -539,38 +426,12 @@ export default function Calendar({ active }) {
     );
   };
 
-  if (error) return <ErrorPanel panelId="calendar" active={active} error={error} onRetry={loadMetrics} />;
-  if (!metrics) return <LoadingPanel panelId="calendar" active={active} />;
+  if (error) return <ErrorPanel panelId="calendar" active={active} error={error} onRetry={() => window.location.reload()} />;
+  if (loading && !calendarRes) return <LoadingPanel panelId="calendar" active={active} />;
 
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel="calendar">
       <style>{`
-        /* Compact metric strip styling */
-        .cal-metric {
-          padding: 10px 12px !important;
-          gap: 8px !important;
-        }
-        .cm-icon {
-          width: 30px !important;
-          height: 30px !important;
-          border-radius: 6px !important;
-        }
-        .cm-icon svg {
-          width: 14px !important;
-          height: 14px !important;
-        }
-        .cm-num {
-          font-size: 18px !important;
-        }
-        .cm-lab {
-          font-size: 10px !important;
-          margin-top: 3px !important;
-        }
-        .cm-sub {
-          font-size: 9px !important;
-          margin-top: 1px !important;
-        }
-
         /* Compact calendar day cells */
         .cal-day {
           min-height: 76px !important;
@@ -608,71 +469,6 @@ export default function Calendar({ active }) {
         }
       `}</style>
       <div className="card" style={{ marginBottom: '18px' }}>
-        <div className="section-head">
-          <div>
-            <div className="section-title">
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" />
-                <path d="M16 2v4M8 2v4M3 10h18" />
-              </svg>
-              Programmes on the Calendar
-            </div>
-            <div className="section-sub" style={{ marginTop: '6px' }}>
-              Each chip is a live programme — click any day to inspect the week. Switch views via the toggle.
-            </div>
-          </div>
-          <div className="section-actions">
-            <button className="btn-ghost" onClick={() => setShowMetrics(prev => !prev)} style={{ marginRight: '8px' }}>
-              {showMetrics ? (
-                <>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '14px', height: '14px', marginRight: '6px' }}>
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a13.19 13.19 0 0 1 1.66-2.66" />
-                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                  Hide Stats
-                </>
-              ) : (
-                <>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '14px', height: '14px', marginRight: '6px' }}>
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                  Show Stats
-                </>
-              )}
-            </button>
-            <button className="btn-ghost" onClick={() => window.qlabs?.openCmdk && window.qlabs.openCmdk()}>
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              Export Snapshot
-            </button>
-          </div>
-        </div>
-
-        {/* Live metric strip — from /api/v1/calendar-metrics */}
-        {showMetrics && (
-          <div className="cal-metric-strip">
-            {metrics.map((met, idx) => (
-              <div className="cal-metric" key={idx}>
-                <div className="cm-icon" style={{ background: met.bg, color: met.color }}>
-                  {renderMetricIcon(met.iconType)}
-                </div>
-                <div className="cm-body">
-                  <div className="cm-num" style={{ color: met.color }}>{met.num}</div>
-                  <div className="cm-lab">{met.lab}</div>
-                  <div className="cm-sub">{met.sub}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-
         {/* Track + Client filter chips */}
         <div className="cal-filters">
           <div className="cf-group">

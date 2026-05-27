@@ -1,15 +1,15 @@
 """OASIS · Opportunity Assessment & Staffing Index.
 
-Given a candidate requirement (delivery name, client, primary track, date
-range, demand), produce:
+Given a candidate requirement (delivery ID, client, primary track, date
+range, demand, ta_demand), produce:
 
   * status / headline      — overall feasibility verdict
   * summary metric tiles   — full availability / staggered fits / replacement
                               opens / hire recommendation, with sub-labels
   * ranked candidates      — every internal + freelancer trainer scored 0-100
                               with bucket (full | staggered | replacement),
-                              skill chips, and a partial-availability label
-                              like "PARTIAL · 1-5 JUN".
+                              skill chips, suggested role, contact info, and a
+                              per-day availability schedule for the range.
 
 Source of truth: the cached Trainer Data Live + Request ID Track payloads.
 No mock data — every list, chip, and number is derived from those sheets.
@@ -32,6 +32,13 @@ _STOPWORDS = {
     "training", "trainer", "trainers", "ta", "tas", "backup",
     "fdp", "course", "program", "phase",
 }
+
+
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        return int(val or default)
+    except (TypeError, ValueError):
+        return default
 
 
 def _tokens(text: str) -> list[str]:
@@ -73,7 +80,6 @@ def _trainer_skill_chips(trainer: dict[str, Any], cap: int = 4) -> list[str]:
     """Distinct past-course strings, up to `cap`, used as the trainer's skill chips."""
     seen: dict[str, str] = {}
     sched = trainer.get("schedule") or {}
-    # Newer assignments first if the dict preserves order; fine either way.
     for cell in sched.values():
         if not cell:
             continue
@@ -119,13 +125,13 @@ def _compute_fit_score(
     skill_pts = 50 * min(1.0, max(0.0, skill_overlap))
     avail_pts = 30 * min(1.0, max(0.0, avail_ratio))
     pool_pts  = 10 if is_internal else 7
-    # Depth: 0 → 0, 5 → ~7, 20+ → 10
     depth_pts = min(10.0, (engagement ** 0.5) * 2.2) if engagement > 0 else 0
     score = round(skill_pts + avail_pts + pool_pts + depth_pts)
     return max(0, min(100, score))
 
 
 _MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+_WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
 
 def _fmt_run(start: date, end: date) -> str:
@@ -137,6 +143,68 @@ def _fmt_run(start: date, end: date) -> str:
     return f"{start.day} {_MONTHS[start.month - 1]}-{end.day} {_MONTHS[end.month - 1]}"
 
 
+def _build_schedule_in_range(
+    sched: dict[str, str],
+    dates: list[date],
+) -> list[dict[str, Any]]:
+    """Per-day schedule rows for the candidate detail modal."""
+    rows = []
+    for d in dates:
+        iso = d.isoformat()
+        cell = sched.get(iso, "")
+        kind = _classify_cell(cell)
+        # Map classify output to display status
+        status_map = {
+            "free":           "FREE",
+            "ta":             "TA",
+            "backup":         "BACKUP",
+            "trainer":        "BUSY",
+            "non_deployable": "N/D",
+        }
+        rows.append({
+            "date":    iso,
+            "day":     d.day,
+            "weekday": _WEEKDAYS[d.weekday()],
+            "status":  status_map.get(kind, "BUSY"),
+            "cell":    cell or "",
+        })
+    return rows
+
+
+def _build_delivery_options(request_track_payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Build delivery list from Request ID Track rows for the Delivery ID dropdown."""
+    deliveries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in ((request_track_payload or {}).get("rows") or []):
+        if not isinstance(row, dict):
+            continue
+        did = (row.get("Delivery ID") or "").strip()
+        if not did or did.lower() in seen:
+            continue
+        seen.add(did.lower())
+
+        def _cell(key: str) -> str:
+            return (row.get(key) or "").strip()
+
+        # Parse dates — may be ISO strings or Excel serial numbers handled upstream
+        start_raw = _cell("Program Start Date")
+        end_raw   = _cell("Program End Date")
+
+        deliveries.append({
+            "delivery_id":    did,
+            "client":         _cell("Client Name"),
+            "primary_track":  _cell("Course"),
+            "start_date":     start_raw,
+            "end_date":       end_raw,
+            "trainers":       _safe_int(row.get("Total Trainer Required")),
+            "ta":             _safe_int(row.get("Total TA's Required")),
+            "domain":         _cell("Domain"),
+            "subdomain":      _cell("Subdomain"),
+            "status":         _cell("Allocation Status"),
+        })
+    return deliveries
+
+
 def assess_opportunity(
     start_iso: str,
     end_iso: str,
@@ -145,6 +213,8 @@ def assess_opportunity(
     client: str,
     delivery_name: str,
     trainer_payload: dict[str, Any],
+    ta_demand: int = 0,
+    delivery_id: str = "",
 ) -> dict[str, Any]:
     """Run the full OASIS assessment. Returns a structured dict, never raises."""
     try:
@@ -156,7 +226,10 @@ def assess_opportunity(
     if start > end:
         return {"error": "invalid_range", "candidates": [], "summary": _empty_summary()}
 
-    demand = max(0, int(demand or 0))
+    demand    = max(0, _safe_int(demand))
+    ta_demand = max(0, _safe_int(ta_demand))
+    total_demand = demand + ta_demand
+
     trainers = trainer_payload.get("trainers", []) or []
     dates = list(_iter_dates(start, end))
     total_days = max(1, len(dates))
@@ -211,41 +284,44 @@ def assess_opportunity(
             avail_label = f"PARTIAL · {sub}" if sub else "PARTIAL"
             avail_sub = sub or None
         else:
-            # Busy through the whole range — useful only as a swap target if
-            # they have the right skills.
             if skill_overlap > 0:
                 bucket = "replacement"
                 avail_label = "REPLACE · BUSY"
                 avail_sub = None
             else:
-                # No availability AND no skill match — drop entirely.
                 continue
 
         score = _compute_fit_score(skill_overlap, avail_ratio, is_internal, engagement)
-        # Soft penalty when the planner gave a track but this trainer has zero
-        # historical overlap — keeps them in the list but rank low.
         if query_tokens and skill_overlap == 0:
             score = round(score * 0.6)
 
         candidates.append({
-            "name": t.get("name", ""),
-            "employee_id": t.get("employee_id", ""),
-            "type": ttype,
-            "type_raw": t.get("type_raw", "") or ("Freelancer" if not is_internal else "Internal"),
+            "name":          t.get("name", ""),
+            "employee_id":   t.get("employee_id", ""),
+            "email":         t.get("email", ""),
+            "phone":         t.get("phone", ""),
+            "designation":   t.get("designation", ""),
+            "campus":        t.get("campus", ""),
+            "joining_date":  t.get("joining_date", ""),
+            "type":          ttype,
+            "type_raw":      t.get("type_raw", "") or ("Freelancer" if not is_internal else "Internal"),
             "vendor": (
                 (t.get("_raw") or {}).get("Vendor Name", "")
                 if isinstance(t.get("_raw"), dict) else ""
             ),
-            "skills": _trainer_skill_chips(t),
-            "fit_score": score,
-            "bucket": bucket,
-            "avail_label": avail_label,
-            "avail_sub": avail_sub,
-            "avail_ratio": round(avail_ratio, 2),
-            "skill_overlap": round(skill_overlap, 2),
-            "matched_terms": matched_terms,
-            "is_internal": is_internal,
-            "engagement": engagement,
+            "skills":           _trainer_skill_chips(t),
+            "fit_score":        score,
+            "bucket":           bucket,
+            "avail_label":      avail_label,
+            "avail_sub":        avail_sub,
+            "avail_ratio":      round(avail_ratio, 2),
+            "skill_overlap":    round(skill_overlap, 2),
+            "matched_terms":    matched_terms,
+            "is_internal":      is_internal,
+            "engagement":       engagement,
+            "schedule_in_range": _build_schedule_in_range(sched, dates),
+            # suggested_role assigned after sorting
+            "suggested_role": "",
         })
 
     # Sort: Internal first → fit_score desc → engagement desc → name asc.
@@ -256,29 +332,38 @@ def assess_opportunity(
         c["name"],
     ))
 
+    # Assign suggested roles based on sorted position.
+    for i, c in enumerate(candidates):
+        if i < demand:
+            c["suggested_role"] = "Trainer"
+        elif i < demand + ta_demand:
+            c["suggested_role"] = "TA"
+        else:
+            c["suggested_role"] = "Bench"
+
     # ---- Aggregate ----
-    full_av_list   = [c for c in candidates if c["bucket"] == "full"      and (c["skill_overlap"] > 0 or not query_tokens)]
-    stag_list      = [c for c in candidates if c["bucket"] == "staggered" and (c["skill_overlap"] > 0 or not query_tokens)]
-    repl_list      = [c for c in candidates if c["bucket"] == "replacement"]
+    full_av_list = [c for c in candidates if c["bucket"] == "full"      and (c["skill_overlap"] > 0 or not query_tokens)]
+    stag_list    = [c for c in candidates if c["bucket"] == "staggered" and (c["skill_overlap"] > 0 or not query_tokens)]
+    repl_list    = [c for c in candidates if c["bucket"] == "replacement"]
 
     full_av    = len(full_av_list)
     stag_fits  = len(stag_list)
     repl_opens = len(repl_list)
     coverable  = full_av + stag_fits
-    hire_rec   = max(0, demand - coverable - repl_opens)
+    hire_rec   = max(0, total_demand - coverable - repl_opens)
 
-    hard_conflicts = max(0, demand - coverable)
+    hard_conflicts = max(0, total_demand - coverable)
 
-    if demand == 0:
+    if total_demand == 0:
         status = "info"
         headline = "Plug in a requirement to assess feasibility"
-    elif full_av >= demand:
+    elif full_av >= total_demand:
         status = "fully_achievable"
         headline = "Fully achievable from internal pool"
-    elif coverable >= demand:
+    elif coverable >= total_demand:
         status = "partial"
         headline = "Partially achievable · stagger required"
-    elif coverable + repl_opens >= demand:
+    elif coverable + repl_opens >= total_demand:
         status = "needs_swap"
         headline = "Achievable with cross-skill swaps"
     else:
@@ -287,19 +372,22 @@ def assess_opportunity(
 
     return {
         "request": {
-            "delivery_name": delivery_name or "",
-            "client": client or "",
-            "primary_track": primary_track or "",
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-            "demand": demand,
-            "days_in_range": total_days,
-            "query_tokens": query_tokens,
+            "delivery_id":    delivery_id or "",
+            "delivery_name":  delivery_name or "",
+            "client":         client or "",
+            "primary_track":  primary_track or "",
+            "start_date":     start.isoformat(),
+            "end_date":       end.isoformat(),
+            "demand":         demand,
+            "ta_demand":      ta_demand,
+            "days_in_range":  total_days,
+            "query_tokens":   query_tokens,
         },
-        "status": status,
+        "status":   status,
         "headline": headline,
         "summary": {
             "trainers_requested": demand,
+            "tas_requested":      ta_demand,
             "fully_available":    full_av,
             "partial_available":  stag_fits,
             "hard_conflicts":     hard_conflicts,
@@ -312,14 +400,14 @@ def assess_opportunity(
             "replacement_opens_label":      "Cross-skill swaps possible" if repl_opens else "—",
             "hire_recommendation_label":    "Bench can absorb" if hire_rec == 0 else f"Hire {hire_rec} freelancer(s)",
         },
-        "candidates": candidates[:24],   # cap so the UI stays snappy
+        "candidates": candidates[:30],
     }
 
 
 def _full_av_label(items: list[dict[str, Any]], query_tokens: list[str]) -> str:
     if not items:
         return "—"
-    internal = sum(1 for c in items if c["is_internal"])
+    internal   = sum(1 for c in items if c["is_internal"])
     freelancer = sum(1 for c in items if not c["is_internal"])
     bits: list[str] = []
     if internal:
@@ -350,6 +438,7 @@ def _staggered_label(items: list[dict[str, Any]]) -> str:
 def _empty_summary() -> dict[str, Any]:
     return {
         "trainers_requested": 0,
+        "tas_requested":      0,
         "fully_available":    0,
         "partial_available":  0,
         "hard_conflicts":     0,
@@ -365,8 +454,8 @@ def _empty_summary() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Dropdown vocabularies — clients + primary tracks, both sourced from the
-# Request ID Track sheet so the form mirrors what the planners actually file.
+# Dropdown vocabularies — deliveries, clients + primary tracks, all sourced
+# from the Request ID Track sheet so the form mirrors what planners file.
 # ---------------------------------------------------------------------------
 def list_options(
     request_track_payload: dict[str, Any] | None,
@@ -389,9 +478,7 @@ def list_options(
             seen_t.add(course.lower())
             tracks.append(course)
 
-    # Secondary track source — distinct course tokens that appear in Trainer
-    # Data Live cells. Catches tracks that the planner hasn't typed into a
-    # Request ID Track row yet (e.g. internal-only deliveries).
+    # Secondary track source — distinct course tokens from Trainer Data Live.
     for t in ((trainer_payload or {}).get("trainers") or []):
         for cell in (t.get("schedule") or {}).values():
             if _classify_cell(cell) in ("free", "non_deployable"):
@@ -406,4 +493,11 @@ def list_options(
 
     clients.sort(key=str.casefold)
     tracks.sort(key=str.casefold)
-    return {"clients": clients, "primary_tracks": tracks}
+
+    deliveries = _build_delivery_options(request_track_payload)
+
+    return {
+        "clients":        clients,
+        "primary_tracks": tracks,
+        "deliveries":     deliveries,
+    }

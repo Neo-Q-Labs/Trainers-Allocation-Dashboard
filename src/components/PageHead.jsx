@@ -1,21 +1,8 @@
-import { PANEL_META } from '../data/navigation.js';
 import SyncButton from './SyncButton.jsx';
 
 export default function PageHead({ activePanel, onNewRequirement }) {
-  const meta = PANEL_META[activePanel] || PANEL_META.overview;
   return (
     <div className="page-head">
-      <div className="page-head-left">
-        <div className="page-icon" id="pageIcon" dangerouslySetInnerHTML={{ __html: meta.icon }} />
-        <div className="page-title-block">
-          <div className="breadcrumb" id="breadcrumb">
-            {meta.crumb}
-          </div>
-          <div className="title" id="pageTitle">
-            {meta.title}
-          </div>
-        </div>
-      </div>
       <div className="page-head-right">
         <SyncButton />
         {/* Export + New Requirement are only relevant on the Requirement page */}

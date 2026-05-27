@@ -43,6 +43,7 @@ function parseSheetDate(raw) {
 }
 
 const fmtShort = (d) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—');
+const fmtFull  = (d) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 function deriveType(row) {
   const internal = parseNum(row['Internal']);
@@ -176,6 +177,7 @@ export default function Requirements({ active }) {
   const [deliveryF, setDeliveryF]       = useState('');
   const [courseF, setCourseF]           = useState('');
   const [clientF, setClientF]           = useState('');
+  const [selected, setSelected]         = useState(null);
 
   const rows = useMemo(() => {
     const raw = data?.rows || [];
@@ -203,10 +205,16 @@ export default function Requirements({ active }) {
           gap: summary.gap,
           risk,
           archived,
+          raw: row, // Save raw record to show detailed information in modal
         };
       })
       .filter((r) => r.delivery_id || r.client || r.course);
   }, [data]);
+
+  const handleRowClick = (row) => {
+    if (!row.raw) return;
+    setSelected(row);
+  };
 
   // Distinct option lists for the searchable dropdowns.
   const opts = useMemo(() => {
@@ -307,15 +315,116 @@ export default function Requirements({ active }) {
         </div>
 
         {view === 'TABLE'
-          ? <RequirementsTable rows={filtered} totalRows={rows.length} />
-          : <GanttChart rows={filtered} />}
+          ? <RequirementsTable rows={filtered} totalRows={rows.length} onRowClick={handleRowClick} />
+          : <GanttChart rows={filtered} onRowClick={handleRowClick} />}
       </div>
+
+      {selected && (
+        <RequirementModal
+          row={selected}
+          headers={data?.headers || []}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </section>
   );
 }
 
+/* ----- Requirement detail modal (slide-in panel) ----- */
+const META_KEYS     = ["Delivery ID", "Client Name", "Course", "Domain", "Subdomain", "Allocation Status", "Training Status"];
+const TIMELINE_KEYS = ["Program Start Date", "Program End Date"];
+const REQ_KEYS      = ["Total Trainer Required", "Total TA's Required", "Internal", "Existing Freelancers", "New Freelancers Hired", "New Freelancer Required", "Risk"];
+const PLANNED_KEYS  = ["Trainer planned", "TA Planned"];
+
+function RequirementModal({ row, headers, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const raw = row.raw || {};
+  const cleanVal = (v) => (v != null && String(v).trim() !== '' ? String(v).trim() : '—');
+  const valFor = (k) => {
+    if (TIMELINE_KEYS.includes(k)) return fmtFull(parseSheetDate(raw[k]));
+    // Any other date-named field: format when it parses, else show the raw text.
+    if (/date/i.test(k)) {
+      const d = parseSheetDate(raw[k]);
+      if (d) return fmtFull(d);
+    }
+    return cleanVal(raw[k]);
+  };
+
+  const pick = (keys) => keys.filter((k) => k in raw).map((k) => ({ k, v: valFor(k) }));
+  const meta     = pick(META_KEYS);
+  const timeline = pick(TIMELINE_KEYS);
+  const req      = pick(REQ_KEYS);
+  const planned  = pick(PLANNED_KEYS);
+
+  const handled = new Set([...META_KEYS, ...TIMELINE_KEYS, ...REQ_KEYS, ...PLANNED_KEYS]);
+  const others = (headers.length ? headers : Object.keys(raw))
+    // Drop the per-day allotment columns (pure-numeric Excel-serial headers) — they're
+    // the day grid, not meaningful record fields, and only clutter the detail view.
+    .filter((h) => h && !h.startsWith('col_') && !/^\d+(\.\d+)?$/.test(h.trim()) && !handled.has(h) && h in raw)
+    .map((k) => ({ k, v: valFor(k) }))
+    .filter(({ v }) => v !== '—');
+
+  const Section = ({ title, items }) => (
+    items.length ? (
+      <div className="oa-det-section">
+        <div className="oa-det-sec-title">{title}</div>
+        <div className="oa-det-grid">
+          {items.map(({ k, v }) => (
+            <div key={k} className="oa-det-contact-row">
+              <span className="oa-det-contact-label">{k}</span>
+              <span className="oa-det-contact-value">{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : null
+  );
+
+  return (
+    <div className="oa-det-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="oa-det-panel" role="dialog" aria-modal="true" aria-label="Requirement detail">
+        <div className="oa-det-head">
+          <div className="oa-det-avatar" style={{ background: 'linear-gradient(135deg,#60a5fa,#2563eb)' }}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ stroke: '#fff' }}>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="13" y1="17" x2="8" y2="17" />
+            </svg>
+          </div>
+          <div className="oa-det-info">
+            <div className="oa-det-name">{row.course || row.client || 'Requirement Details'}</div>
+            <div className="oa-det-sub">
+              <span className={`oa-tbl-role oa-role-${row.status === 'OPEN' ? 'ta' : row.status === 'CLOSED' ? 'trainer' : 'bench'}`}>{row.status}</span>
+              <span className={`oa-tbl-pool ${row.type === 'INTERNAL' ? 'oa-pool-int' : 'oa-pool-frl'}`}>{row.type}</span>
+              <span className="oa-tbl-avail oa-avail-partial">{windowLabel(row.start, row.end)}</span>
+            </div>
+            {row.delivery_id && <div className="oa-det-id">Delivery ID: {row.delivery_id}</div>}
+          </div>
+          <button type="button" className="oa-det-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="oa-det-body">
+          <Section title="General Info" items={meta} />
+          <Section title="Timeline" items={timeline} />
+          <Section title="Staffing &amp; Risk Requirements" items={req} />
+          <Section title="Planned Assignments" items={planned} />
+          <Section title="Additional Data Fields" items={others} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ----- table ----- */
-function RequirementsTable({ rows, totalRows }) {
+function RequirementsTable({ rows, totalRows, onRowClick }) {
   if (totalRows === 0) {
     return <div className="rq-empty"><div className="rq-empty-title">No requirements found</div><div className="rq-empty-sub">The Request ID Track sheet returned no rows.</div></div>;
   }
@@ -348,7 +457,7 @@ function RequirementsTable({ rows, totalRows }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, idx) => <RequirementsRow key={`${r.delivery_id}-${idx}`} row={r} />)}
+          {rows.map((r, idx) => <RequirementsRow key={`${r.delivery_id}-${idx}`} row={r} onRowClick={onRowClick} />)}
         </tbody>
       </table>
       <div className="rq-table-foot">
@@ -358,12 +467,12 @@ function RequirementsTable({ rows, totalRows }) {
   );
 }
 
-function RequirementsRow({ row }) {
+function RequirementsRow({ row, onRowClick }) {
   const tone = riskTone(row.risk);
   const subBits = [row.client, row.domain, row.subdomain].filter(Boolean);
   const subtitle = subBits.join(' · ');
   return (
-    <tr className={`rq-row${row.archived ? ' is-archived' : ''}`}>
+    <tr className={`rq-row${row.archived ? ' is-archived' : ''} cursor-pointer`} onClick={() => onRowClick(row)}>
       <td className="rq-cell-bar" aria-hidden="true"><span className={`rq-bar is-${tone}`} /></td>
       <td className="rq-cell-id"><span className="rq-id" title={row.delivery_id || '—'}>{row.delivery_id || '—'}</span></td>
       <td className="rq-cell-cc">
@@ -380,7 +489,7 @@ function RequirementsRow({ row }) {
 }
 
 /* ----- Gantt timeline ----- */
-function GanttChart({ rows }) {
+function GanttChart({ rows, onRowClick }) {
   const dated = useMemo(() => rows.filter((r) => r.start && r.end && r.end >= r.start), [rows]);
 
   const domain = useMemo(() => {
@@ -467,9 +576,10 @@ function GanttChart({ rows }) {
                     ))}
                     {todayPct != null && <div className="rq-gantt-today-line" style={{ left: `${todayPct}%` }} />}
                     <div
-                      className={`rq-gantt-bar rq-gantt-bar-${tone}`}
+                      className={`rq-gantt-bar rq-gantt-bar-${tone} cursor-pointer`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       title={`${r.delivery_id} · ${r.course}\n${fmtShort(r.start)} → ${fmtShort(r.end)}\n${r.trainer_required} trainers · ${r.ta_required} TAs · ${r.status}`}
+                      onClick={() => onRowClick(r)}
                     >
                       <span className="rq-gantt-bar-label">{r.course || r.delivery_id}</span>
                     </div>
