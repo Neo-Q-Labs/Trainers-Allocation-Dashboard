@@ -2,6 +2,8 @@ import { useState, useMemo, useRef, useEffect, memo } from 'react';
 import { useGetTrainersQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import ExportButton from '../components/ExportButton.jsx';
+import { exportToExcel } from '../lib/exportExcel.js';
 
 /* ============================================================
    Trainer Matrix · Engagement Grid
@@ -347,6 +349,87 @@ export default function Matrix({ active }) {
     setPoolOpen(false);
   };
 
+  // ---- Export handler: 2 sheets, deduplicated ----
+  const handleExport = () => {
+    if (!gridRows.length) return;
+
+    // Sheet 1 – Trainer Roster (one row per trainer, deduped by name+id)
+    const rosterRows = gridRows.map((e) => ({
+      name:         e.name,
+      employee_id:  e.employee_id || '—',
+      type:         e.type,
+      pool:         e.pool,
+      today_status: e.status,
+      avail_days:   e.stats.avail,
+      allocated:    e.stats.allocated,
+      leave_days:   e.stats.leave,
+      load_pct:     e.stats.load,
+      tracks:       Array.from(e.trackToks).join(', ') || '—',
+      clients:      Array.from(e.clientSet).join(', ') || '—',
+      window_start: rangeStart,
+      window_end:   rangeEnd,
+    }));
+
+    // Sheet 2 – Day-wise Occupancy (one row per trainer × date, unique by design)
+    const occupancyRows = [];
+    for (const e of gridRows) {
+      const sched = e.ref.schedule || {};
+      for (const d of days) {
+        const cell = sched[d.iso] || '';
+        const st   = cellState(cell, d.iso);
+        occupancyRows.push({
+          trainer:      e.name,
+          employee_id:  e.employee_id || '—',
+          type:         e.type,
+          pool:         e.pool,
+          date:         d.iso,
+          day_of_week:  new Date(d.iso).toLocaleDateString('en-GB', { weekday: 'long' }),
+          cell_value:   cell || '—',
+          state:        STATE_LABEL[st] || st,
+        });
+      }
+    }
+
+    exportToExcel({
+      filename: 'trainer-matrix',
+      sheets: [
+        {
+          name: 'Trainer Roster',
+          columns: [
+            { header: 'Trainer Name',      key: 'name'         },
+            { header: 'Employee ID',       key: 'employee_id'  },
+            { header: 'Type',              key: 'type'         },
+            { header: 'Pool',              key: 'pool'         },
+            { header: 'Today’s Status',    key: 'today_status' },
+            { header: 'Avail Days',        key: 'avail_days'   },
+            { header: 'Allocated Days',    key: 'allocated'    },
+            { header: 'Leave Days',        key: 'leave_days'   },
+            { header: 'Load %',            key: 'load_pct'     },
+            { header: 'Tracks',            key: 'tracks'       },
+            { header: 'Clients',           key: 'clients'      },
+            { header: 'Window Start',      key: 'window_start' },
+            { header: 'Window End',        key: 'window_end'   },
+          ],
+          rows: rosterRows,
+        },
+        {
+          name: 'Day-wise Occupancy',
+          columns: [
+            { header: 'Trainer Name',  key: 'trainer'      },
+            { header: 'Employee ID',   key: 'employee_id'  },
+            { header: 'Type',          key: 'type'         },
+            { header: 'Pool',          key: 'pool'         },
+            { header: 'Date',          key: 'date'         },
+            { header: 'Day of Week',   key: 'day_of_week'  },
+            { header: 'Cell Value',    key: 'cell_value'   },
+            { header: 'State',         key: 'state'        },
+          ],
+          rows: occupancyRows,
+        },
+      ],
+    });
+  };
+
   // Close the pool dropdown on outside click / Escape.
   const poolRef = useRef(null);
   useEffect(() => {
@@ -435,6 +518,11 @@ export default function Matrix({ active }) {
                 </div>
               )}
             </div>
+            <ExportButton
+              onClick={handleExport}
+              disabled={!gridRows.length}
+              label={`Export (${gridRows.length})`}
+            />
           </div>
         </header>
 

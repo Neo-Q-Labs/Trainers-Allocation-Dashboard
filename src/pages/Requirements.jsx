@@ -1,6 +1,8 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { useGetRequestTrackQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
+import ExportButton from '../components/ExportButton.jsx';
+import { exportToExcel } from '../lib/exportExcel.js';
 
 /* ============================================================
    Requirement — live tabular + Gantt view
@@ -256,6 +258,73 @@ export default function Requirements({ active }) {
     setDeliveryF(''); setCourseF(''); setClientF(''); setSearch(''); setStatusFilter('ALL');
   };
 
+  const handleExport = () => {
+    if (!filtered.length) return;
+
+    // ---- Deduplicate by Delivery ID (keep first occurrence per ID) ----
+    const seen = new Set();
+    const unique = filtered.filter((r) => {
+      const id = r.delivery_id || `__noId_${r.course}_${r.client}`;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+    // ---- Sheet 1: Summary (derived / cleaned columns) ----
+    const summarySheet = {
+      name: 'Summary',
+      columns: [
+        { header: 'Delivery ID',          key: 'delivery_id'       },
+        { header: 'Client',               key: 'client'            },
+        { header: 'Course',               key: 'course'            },
+        { header: 'Domain',               key: 'domain'            },
+        { header: 'Subdomain',            key: 'subdomain'         },
+        { header: 'Type',                 key: 'type'              },
+        { header: 'Status',               key: 'status'            },
+        { header: 'Start Date',           value: (r) => fmtFull(r.start) },
+        { header: 'End Date',             value: (r) => fmtFull(r.end)   },
+        { header: 'Trainers Required',    key: 'trainer_required'  },
+        { header: "TAs Required",         key: 'ta_required'       },
+        { header: 'Total Required',       key: 'required'          },
+        { header: 'Gap',                  key: 'gap'               },
+        { header: 'Risk',                 key: 'risk'              },
+        { header: 'Archived',             value: (r) => r.archived ? 'Yes' : 'No' },
+      ],
+      rows: unique,
+    };
+
+    // ---- Sheet 2: Full Detail (every raw field from the source sheet) ----
+    // Use the headers returned by the backend; fall back to the union of all keys.
+    const rawHeaders = data?.headers?.length
+      ? data.headers.filter((h) => h && !/^\d+(\.\d+)?$/.test(h.trim()))
+      : Array.from(new Set(unique.flatMap((r) => Object.keys(r.raw || {}))))
+          .filter((h) => h && !/^\d+(\.\d+)?$/.test(h.trim()));
+
+    const detailSheet = {
+      name: 'Full Detail',
+      columns: rawHeaders.map((h) => ({
+        header: h,
+        value: (r) => {
+          const raw = r.raw || {};
+          const v = raw[h];
+          if (v == null || v === '') return '';
+          // Format date-named columns
+          if (/date/i.test(h)) {
+            const d = parseSheetDate(v);
+            if (d) return fmtFull(d);
+          }
+          return String(v);
+        },
+      })),
+      rows: unique,
+    };
+
+    exportToExcel({
+      filename: 'requirements',
+      sheets: [summarySheet, detailSheet],
+    });
+  };
+
   if (error) {
     return (
       <ErrorPanel panelId="requirements" active={active}
@@ -293,6 +362,11 @@ export default function Requirements({ active }) {
               <button type="button" role="tab" aria-selected={view === 'TABLE'} className={`rq-view-btn${view === 'TABLE' ? ' is-active' : ''}`} onClick={() => setView('TABLE')}>TABLE</button>
               <button type="button" role="tab" aria-selected={view === 'GANTT'} className={`rq-view-btn${view === 'GANTT' ? ' is-active' : ''}`} onClick={() => setView('GANTT')}>GANTT</button>
             </div>
+            <ExportButton
+              onClick={handleExport}
+              disabled={!filtered.length}
+              label={`Export (${filtered.length})`}
+            />
           </div>
         </header>
 

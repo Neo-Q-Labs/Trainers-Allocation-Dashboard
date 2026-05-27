@@ -6,6 +6,8 @@ import {
 } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import ExportButton from '../components/ExportButton.jsx';
+import { exportToExcel } from '../lib/exportExcel.js';
 
 import KpiStrip            from '../components/dash/KpiStrip.jsx';
 import DemandCapacityChart from '../components/dash/DemandCapacityChart.jsx';
@@ -61,6 +63,110 @@ export default function Overview({ active }) {
     return all.filter((d) => d.date >= rangeStart && d.date <= rangeEnd);
   }, [kpis.demand_vs_capacity, rangeStart, rangeEnd]);
 
+  // ---- Export handler: 3 sheets, deduped pipeline ----
+  const handleExport = () => {
+    const stamp = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    // Sheet 1 – KPI Summary
+    const kpiRows = [
+      { metric: 'Total Trainers',          value: kpis.trainer_roster_count ?? '—' },
+      { metric: 'Active Trainers',         value: kpis.active_trainers ?? '—' },
+      { metric: 'Utilisation %',           value: kpis.utilisation_pct != null ? `${kpis.utilisation_pct}%` : '—' },
+      { metric: 'Upcoming Deliveries',     value: kpis.upcoming_deliveries ?? '—' },
+      { metric: 'Open Gaps',               value: pending.open_gaps ?? pending.total ?? '—' },
+      { metric: 'Report Date',             value: stamp },
+      { metric: 'Range Start',             value: rangeStart },
+      { metric: 'Range End',               value: rangeEnd },
+    ];
+
+    // Sheet 2 – Demand vs Capacity (scoped to selected range)
+    const demandRows = chartData.map((d) => ({
+      date:     d.date,
+      demand:   d.demand   ?? 0,
+      capacity: d.capacity ?? 0,
+      gap:      (d.capacity ?? 0) - (d.demand ?? 0),
+    }));
+
+    // Sheet 3 – Active Pipeline (deduped by Delivery ID)
+    const seen = new Set();
+    const pipelineRows = rtRows
+      .filter((r) => {
+        const id = String(r['Delivery ID'] || '').trim();
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map((r) => ({
+        delivery_id:        String(r['Delivery ID']        || '').trim(),
+        client:             String(r['Client Name']        || '').trim(),
+        course:             String(r['Course']             || '').trim(),
+        domain:             String(r['Domain']             || '').trim(),
+        subdomain:          String(r['Subdomain']          || '').trim(),
+        start_date:         String(r['Program Start Date'] || '').trim(),
+        end_date:           String(r['Program End Date']   || '').trim(),
+        allocation_status:  String(r['Allocation Status']  || '').trim(),
+        training_status:    String(r['Training Status']    || '').trim(),
+        trainer_required:   r['Total Trainer Required'] ?? '',
+        ta_required:        r["Total TA's Required"]    ?? '',
+        internal:           r['Internal']               ?? '',
+        existing_fl:        r['Existing Freelancers']   ?? '',
+        new_fl_hired:       r['New Freelancers Hired']  ?? '',
+        new_fl_required:    r['New Freelancer Required']?? '',
+        risk:               r['Risk']                   ?? '',
+        trainer_planned:    r['Trainer planned']        ?? '',
+        ta_planned:         r['TA Planned']             ?? '',
+      }));
+
+    exportToExcel({
+      filename: 'dashboard',
+      sheets: [
+        {
+          name: 'KPI Summary',
+          columns: [
+            { header: 'Metric', key: 'metric' },
+            { header: 'Value',  key: 'value'  },
+          ],
+          rows: kpiRows,
+        },
+        {
+          name: 'Demand vs Capacity',
+          columns: [
+            { header: 'Date',            key: 'date'     },
+            { header: 'Trainer Demand',  key: 'demand'   },
+            { header: 'Roster Capacity', key: 'capacity' },
+            { header: 'Gap (Cap−Dem)',   key: 'gap'      },
+          ],
+          rows: demandRows,
+        },
+        {
+          name: 'Active Pipeline',
+          columns: [
+            { header: 'Delivery ID',         key: 'delivery_id'       },
+            { header: 'Client',              key: 'client'            },
+            { header: 'Course',              key: 'course'            },
+            { header: 'Domain',              key: 'domain'            },
+            { header: 'Subdomain',           key: 'subdomain'         },
+            { header: 'Start Date',          key: 'start_date'        },
+            { header: 'End Date',            key: 'end_date'          },
+            { header: 'Allocation Status',   key: 'allocation_status' },
+            { header: 'Training Status',     key: 'training_status'   },
+            { header: 'Trainers Required',   key: 'trainer_required'  },
+            { header: 'TAs Required',        key: 'ta_required'       },
+            { header: 'Internal',            key: 'internal'          },
+            { header: 'Existing Freelancers',key: 'existing_fl'       },
+            { header: 'New FL Hired',        key: 'new_fl_hired'      },
+            { header: 'New FL Required',     key: 'new_fl_required'   },
+            { header: 'Risk',                key: 'risk'              },
+            { header: 'Trainers Planned',    key: 'trainer_planned'   },
+            { header: 'TAs Planned',         key: 'ta_planned'        },
+          ],
+          rows: pipelineRows,
+        },
+      ],
+    });
+  };
+
   if (error) {
     return (
       <ErrorPanel
@@ -81,6 +187,11 @@ export default function Overview({ active }) {
           start={rangeStart} end={rangeEnd}
           defaultStart={defaultStart} defaultEnd={defaultEnd}
           onApply={(s, e) => { setRangeStart(s); setRangeEnd(e); }}
+        />
+        <ExportButton
+          onClick={handleExport}
+          disabled={!rtRows.length && !chartData.length}
+          label="Export"
         />
       </div>
 

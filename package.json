@@ -18,7 +18,8 @@
     "@reduxjs/toolkit": "^2.12.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-redux": "^9.3.0"
+    "react-redux": "^9.3.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

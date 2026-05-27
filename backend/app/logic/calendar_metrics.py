@@ -102,8 +102,8 @@ def compute_calendar_data(parsed: dict[str, Any], year: int, month: int = None) 
             "delivery_id": a.get("delivery_id", ""),
             "trainer": a.get("trainer", ""),
             "campus": a.get("campus", ""),
-            "track": _extract_track(a.get("training_category", "")),
-            "client": _extract_client(a.get("campus", ""))
+            "track": _extract_track(a),
+            "client": _extract_client(a)
         }
         
         daily_data[date_str]["events"].append(programme)
@@ -179,8 +179,8 @@ def compute_week_data(parsed: dict[str, Any], target_date: str) -> dict[str, Any
                 "name": a.get("course_name", "Unknown Course"),
                 "delivery_id": a.get("delivery_id", ""),
                 "trainer": a.get("trainer", ""),
-                "track": _extract_track(a.get("training_category", "")),
-                "client": _extract_client(a.get("campus", ""))
+                "track": _extract_track(a),
+                "client": _extract_client(a)
             }
             events.append(programme)
             if programme["delivery_id"]:
@@ -204,8 +204,8 @@ def compute_week_data(parsed: dict[str, Any], target_date: str) -> dict[str, Any
         programme_summary.append({
             "delivery_id": delivery_id,
             "name": sample_assignment.get("course_name", "Unknown Course"),
-            "track": _extract_track(sample_assignment.get("training_category", "")),
-            "client": _extract_client(sample_assignment.get("campus", "")),
+            "track": _extract_track(sample_assignment),
+            "client": _extract_client(sample_assignment),
             "days_this_week": days
         })
     
@@ -257,8 +257,8 @@ def compute_gantt_data(parsed: dict[str, Any], start_date: str, days: int) -> di
             "date": a["date"],
             "programme": a.get("course_name", "Unknown Course"),
             "delivery_id": a.get("delivery_id", ""),
-            "track": _extract_track(a.get("training_category", "")),
-            "client": _extract_client(a.get("campus", "")),
+            "track": _extract_track(a),
+            "client": _extract_client(a),
             "campus": a.get("campus", ""),
             "day_offset": (a["parsed_date"] - start).days
         })
@@ -284,46 +284,68 @@ def compute_gantt_data(parsed: dict[str, Any], start_date: str, days: int) -> di
     }
 
 
-def _extract_track(training_category: str) -> str:
-    """Extract track from training category"""
-    category = training_category.lower()
-    if "java" in category or "spring" in category:
+def _extract_track(assignment: dict) -> str:
+    """Extract track from the full assignment dict.
+
+    Scans training_category, course_name, and cell_value (the raw assignment
+    text like 'SKG-MERN-Trainer') using the same rich patterns as the Matrix
+    page so the Calendar track dropdown reflects live data.
+    """
+    import re
+    text = " ".join(filter(None, [
+        str(assignment.get("training_category", "") or ""),
+        str(assignment.get("course_name", "") or ""),
+        str(assignment.get("cell_value", "") or ""),
+    ])).lower()
+
+    if re.search(r'\b(java[\s_-]?fs|java[\s_-]?full|jfs|mern|mean|spring[\s_-]?boot|j2ee|java)\b', text):
         return "java"
-    elif "python" in category or "ml" in category or "machine learning" in category:
+    if re.search(r'\b(python|machine[\s_-]?learning|\bml\b|data[\s_-]?sci|gen[\s_-]?ai|genai|\bai\b|\bnlp\b)\b', text):
         return "python"
-    elif "cloud" in category or "aws" in category or "azure" in category:
+    if re.search(r'(\.net|dotnet|\bnet\b|azure|\baws\b|\bgcp\b|cloud|devops|kubernetes)', text):
         return "cloud"
-    elif "react" in category or "node" in category or "javascript" in category:
+    if re.search(r'\b(react|angular|frontend|front[\s_-]?end|javascript|node\.?js|vue|html|css)\b', text):
         return "react"
-    elif "test" in category or "qa" in category or "sdet" in category:
+    if re.search(r'\b(test|qa\b|sdet|selenium|quality[\s_-]?assur|automation)\b', text):
         return "testing"
-    elif "data" in category or "analytics" in category:
+    if re.search(r'\b(data[\s_-]?analytics|data[\s_-]?eng|analytics|power[\s_-]?bi|tableau)\b', text):
         return "data"
-    elif "cyber" in category or "security" in category:
+    if re.search(r'\b(cyber|security|infosec|ethical[\s_-]?hack)\b', text):
         return "cyber"
-    elif "sap" in category:
+    if re.search(r'\b(sap|abap|hana|fico|s\/4)\b', text):
         return "sap"
-    else:
+    if re.search(r'\b(sql|database|mysql|oracle|plsql|mongo|postgres)\b', text):
+        return "data"
+    if re.search(r'\b(dsa|data[\s_-]?struct|algorithm|aptitude|quant|reasoning|verbal|soft[\s_-]?skill)\b', text):
         return "other"
+    return "other"
 
 
-def _extract_client(campus: str) -> str:
-    """Extract client from campus field"""
-    campus_lower = campus.lower()
-    if "parul" in campus_lower:
+def _extract_client(assignment: dict) -> str:
+    """Extract client key from the full assignment dict.
+
+    Scans campus, course_name, and cell_value for known client tokens so that
+    assignments written as 'SKG-MERN-Trainer' map to the correct client.
+    """
+    text = " ".join(filter(None, [
+        str(assignment.get("campus", "") or ""),
+        str(assignment.get("course_name", "") or ""),
+        str(assignment.get("cell_value", "") or ""),
+    ])).lower()
+
+    if "parul" in text:
         return "parul"
-    elif "skg" in campus_lower or "sri krishna" in campus_lower:
+    if "skg" in text or "sri krishna" in text:
         return "skg"
-    elif "lti" in campus_lower or "ltimindtree" in campus_lower:
+    if "lti" in text or "ltimindtree" in text or "mindtree" in text:
         return "lti"
-    elif "kct" in campus_lower:
+    if "kct" in text:
         return "kct"
-    elif "hexaware" in campus_lower:
+    if "hexaware" in text:
         return "hexaware"
-    elif "iamneo" in campus_lower:
+    if "iamneo" in text or "iamneo" in text:
         return "iamneo"
-    else:
-        return "other"
+    return "other"
 
 
 def _create_gantt_bars(assignments: list[dict], start_date: date) -> list[dict]:

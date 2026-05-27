@@ -1,1051 +1,643 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   useGetCalendarDataQuery,
-  useGetCalendarWeekQuery,
   useGetCalendarGanttQuery,
   useGetDeliveriesQuery,
 } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
+import { exportToExcel } from '../lib/exportExcel.js';
 
-const calendarTracks = [
-  { val: 'all', label: 'All Tracks' },
-  { val: 'dsa', label: 'DSA' },
-  { val: 'apt', label: 'Aptitude' },
-  { val: 'java', label: 'Java FS' },
-  { val: 'cloud', label: '.NET/Cloud' },
-  { val: 'cyber', label: 'Cy.Sec' },
-  { val: 'sap', label: 'SAP' },
-  { val: 'python', label: 'Python/ML' }
-];
+/* ============================================================
+   Calendar — Google-Calendar-style planning surface
+   ------------------------------------------------------------
+   Views: Week · Month · Quarter · Year · Gantt.
+   One year-wide /calendar-data fetch feeds Week/Month/Quarter/
+   Year + the day-detail modal; /calendar-gantt feeds Gantt.
+   Searchable Track + Client filters are derived from the live
+   backend data (no hardcoded vocab). Every day cell is
+   clickable → a modal listing all programmes for that date,
+   enriched from /deliveries. No mock data.
+   ============================================================ */
 
-const calendarClients = [
-  { val: 'all', label: 'All Clients' },
-  { val: 'parul', label: 'Parul Univ' },
-  { val: 'skg', label: 'SKG' },
-  { val: 'lti', label: 'LTIMindtree' },
-  { val: 'kct', label: 'KCT' },
-  { val: 'hexaware', label: 'Hexaware' },
-  { val: 'iamneo', label: 'iamneo Internal' }
-];
-
-// Client → CSS class + display color mapping
-const CLIENT_META = {
-  parul:    { cls: 'client-parul',    color: '#818cf8', label: 'Parul Univ' },
-  skg:      { cls: 'client-skg',      color: '#22d3a5', label: 'SKG' },
-  lti:      { cls: 'client-lti',      color: '#06b6d4', label: 'LTIMindtree' },
-  kct:      { cls: 'client-kct',      color: '#f5c542', label: 'KCT' },
-  hexaware: { cls: 'client-hexaware', color: '#fb923c', label: 'Hexaware' },
-  iamneo:   { cls: 'client-iamneo',   color: '#a855f7', label: 'iamneo' },
-  other:    { cls: 'client-other',    color: '#94a3b8', label: 'Other' },
-};
-
-function clientClass(client) {
-  return CLIENT_META[client]?.cls || 'client-other';
-}
-
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const DOW_S = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
-const MONTHS_SHORT = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-];
-
+const TODAY = new Date(2026, 4, 22); // app "today" anchor (22 May 2026)
 const CAPACITY = 42;
 
-/** Formatter helper for backend-compatible YYYY-MM-DD keys */
-const key = (d) => {
+const DOW   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DOW_S = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const TRACK_LABEL = {
+  java: 'Java FS', python: 'Python / ML', react: 'React / JS', cloud: 'Cloud & DevOps',
+  testing: 'Testing / QA', data: 'Data / Analytics', cyber: 'Cyber Security', sap: 'SAP', other: 'Other',
+};
+const CLIENT_META = {
+  parul:    { color: '#818cf8', label: 'Parul Univ' },
+  skg:      { color: '#22d3a5', label: 'SKG' },
+  lti:      { color: '#06b6d4', label: 'LTIMindtree' },
+  kct:      { color: '#f5c542', label: 'KCT' },
+  hexaware: { color: '#fb923c', label: 'Hexaware' },
+  iamneo:   { color: '#a855f7', label: 'iamneo' },
+  other:    { color: '#94a3b8', label: 'Other' },
+};
+const clientColor = (c) => CLIENT_META[c]?.color || CLIENT_META.other.color;
+const clientLabel = (c) => CLIENT_META[c]?.label || (c ? c.toUpperCase() : 'Other');
+const trackLabel  = (t) => TRACK_LABEL[t] || (t ? t.toUpperCase() : 'Other');
+
+// Local YYYY-MM-DD key (matches backend's local-date keys).
+const isoKey = (d) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dateNum = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dateNum}`;
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
 };
+const sameDate = (a, b) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-const isSameDate = (a, b) => {
-  return a.getFullYear() === b.getFullYear() && 
-         a.getMonth() === b.getMonth() && 
-         a.getDate() === b.getDate();
-};
-
-const loadLevel = (demand) => {
-  if (demand === 0) return 'l0';
-  if (demand > CAPACITY) return 'l5';
-  if (demand >= 35) return 'l4';
-  if (demand >= 20) return 'l2';
-  if (demand >= 10) return 'l1';
-  return 'l0';
-};
-
-/** Clean and truncate long program names to be short and readable */
 function cleanEventName(name) {
   if (!name) return '';
-  let cleaned = name;
-  
-  // Remove common prefixes
-  cleaned = cleaned.replace(/^(Exam Reporting|Summer Residential|Residential Phase\s*\d+|SKG Electives)\s*:\s*/i, '');
-
-  // Split on pipe (|) or bullet (·)
-  const mainSplitters = ['|', '·'];
-  for (const splitter of mainSplitters) {
-    if (cleaned.includes(splitter)) {
-      cleaned = cleaned.split(splitter)[0].trim();
-    }
-  }
-
-  // Also clean up any lingering prefix/suffix with colons
-  if (cleaned.includes(':')) {
-    const parts = cleaned.split(':').map(p => p.trim());
-    cleaned = parts[parts.length - 1];
-  }
-
-  cleaned = cleaned.trim();
-
-  // Truncate if still too long
-  if (cleaned.length > 20) {
-    cleaned = cleaned.substring(0, 18) + '...';
-  }
-  
-  return cleaned;
+  let s = name;
+  s = s.replace(/^(Exam Reporting|Summer Residential|Residential Phase\s*\d+|SKG Electives)\s*:\s*/i, '');
+  for (const sp of ['|', '·']) if (s.includes(sp)) s = s.split(sp)[0].trim();
+  if (s.includes(':')) { const p = s.split(':').map((x) => x.trim()); s = p[p.length - 1]; }
+  s = s.trim();
+  return s.length > 26 ? s.slice(0, 24) + '…' : s;
 }
 
+const fmtFullDate = (iso) => {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }); }
+  catch { return iso; }
+};
+
 export default function Calendar({ active }) {
-  // Filter States
-  const [trackFilter, setTrackFilter] = useState('all');
-  const [clientFilter, setClientFilter] = useState('all');
-
-  // Programme-detail modal (opens when a "Programmes Running This Week" card is clicked)
-  const [progDetailId, setProgDetailId] = useState(null);
-
-  // View States
-  const [view, setView] = useState('month'); // 'month', 'quarter', 'year', 'gantt'
-  const [cursorDate, setCursorDate] = useState(() => new Date(2026, 4, 22)); // May 22, 2026 as target today
-  const [selectedDate, setSelectedDate] = useState(() => new Date(2026, 4, 22));
-
-  // Gantt specific filter states
+  const [view, setView] = useState('month');                 // week | month | quarter | year | gantt
+  const [cursor, setCursor] = useState(() => new Date(TODAY));
+  const [selected, setSelected] = useState(() => new Date(TODAY));
+  const [trackF, setTrackF] = useState('');
+  const [clientF, setClientF] = useState('');
+  const [modalDate, setModalDate] = useState(null);          // ISO string of clicked day
   const [ganttSearch, setGanttSearch] = useState('');
-  const [trainerToggle, setTrainerToggle] = useState('engaged'); // 'engaged', 'all'
+  const [trainerToggle, setTrainerToggle] = useState('engaged');
 
-  const cursorYear = cursorDate.getFullYear();
-  const cursorMonth = cursorDate.getMonth();
+  const cursorYear = cursor.getFullYear();
 
-  // ----- Redux-backed queries -----
-  // Deliveries — used to enrich the programme-detail modal with status, dates,
-  // trainer list, total/filled slots. Already in the global Redux cache.
+  // ---- Backend data (year-wide; one fetch powers all non-gantt views) ----
+  const { data: yearRes, isFetching: loadingYear, error: yearErr } =
+    useGetCalendarDataQuery({ year: cursorYear });
+  const calendarData = yearRes?.calendar_data || {};
+
+  const { data: ganttRes, isFetching: loadingGantt, error: ganttErr } =
+    useGetCalendarGanttQuery(
+      { start_date: isoKey(cursor), days: 28 },
+      { skip: view !== 'gantt' },
+    );
+
   const { data: deliveriesData } = useGetDeliveriesQuery({});
-  const deliveryByIdMap = useMemo(() => {
+  const deliveryById = useMemo(() => {
     const m = new Map();
-    (deliveriesData?.deliveries || []).forEach((d) => {
-      if (d.delivery_id) m.set(d.delivery_id, d);
-    });
+    (deliveriesData?.deliveries || []).forEach((d) => { if (d.delivery_id) m.set(d.delivery_id, d); });
     return m;
   }, [deliveriesData]);
 
-  // Calendar data (year-wide if quarter/year, month-bound otherwise).
-  const calendarArgs = useMemo(() => {
-    if (view === 'month') return { year: cursorYear, month: cursorMonth + 1 };
-    if (view === 'quarter' || view === 'year') return { year: cursorYear, month: null };
-    return null; // gantt view doesn't use this
-  }, [view, cursorYear, cursorMonth]);
-  const {
-    data: calendarRes,
-    isFetching: loadingCal,
-    error: calErr,
-  } = useGetCalendarDataQuery(calendarArgs ?? { year: cursorYear }, { skip: !calendarArgs });
-  const calendarData = calendarRes?.calendar_data || (calendarArgs ? null : {});
+  const error = yearErr || ganttErr;
 
-  // Gantt data (only when gantt view is active).
-  const ganttArg = useMemo(
-    () => (view === 'gantt' ? { start_date: key(cursorDate), days: 28 } : null),
-    [view, cursorDate],
-  );
-  const {
-    data: ganttData,
-    isFetching: loadingGantt,
-    error: ganttErr,
-  } = useGetCalendarGanttQuery(ganttArg ?? { start_date: key(cursorDate), days: 28 }, { skip: !ganttArg });
-
-  // Week drill-down — driven by the selected day cell.
-  const weekKey = useMemo(() => key(selectedDate), [selectedDate]);
-  const {
-    data: weekData,
-    isFetching: loadingWeek,
-  } = useGetCalendarWeekQuery(weekKey, { skip: !active });
-
-  const loading = loadingCal || loadingGantt;
-  const error = calErr || ganttErr;
-
-  // Helper to dynamically filter events and demand for any day
-  const getFilteredDayData = useCallback((events, demand) => {
-    const evts = events || [];
-    const filteredEvents = evts.filter((evt) => {
-      if (trackFilter !== 'all' && evt.track !== trackFilter) return false;
-      if (clientFilter !== 'all' && evt.client !== clientFilter) return false;
-      return true;
-    });
-
-    const ratio = evts.length > 0 ? filteredEvents.length / evts.length : 0;
-    const filteredDemand = Math.round((demand || 0) * ratio);
-
-    return {
-      demand: filteredDemand,
-      events: filteredEvents
-    };
-  }, [trackFilter, clientFilter]);
-
-  // Handle Day Clicks
-  const handleDayClick = useCallback((cellDate) => {
-    setSelectedDate(cellDate);
-    // Smooth-scroll to week-of panel
-    const weekEl = document.getElementById('weekGridSection');
-    if (weekEl) {
-      weekEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, []);
-
-  // Main Toolbar Navigation Handlers
-  const handlePrev = () => {
-    const newDate = new Date(cursorDate);
-    if (view === 'month') {
-      newDate.setMonth(newDate.getMonth() - 1);
-    } else if (view === 'quarter') {
-      newDate.setMonth(newDate.getMonth() - 3);
-    } else if (view === 'year') {
-      newDate.setFullYear(newDate.getFullYear() - 1);
-    } else if (view === 'gantt') {
-      newDate.setDate(newDate.getDate() - 28);
-    }
-    setCursorDate(newDate);
-  };
-
-  const handleNext = () => {
-    const newDate = new Date(cursorDate);
-    if (view === 'month') {
-      newDate.setMonth(newDate.getMonth() + 1);
-    } else if (view === 'quarter') {
-      newDate.setMonth(newDate.getMonth() + 3);
-    } else if (view === 'year') {
-      newDate.setFullYear(newDate.getFullYear() + 1);
-    } else if (view === 'gantt') {
-      newDate.setDate(newDate.getDate() + 28);
-    }
-    setCursorDate(newDate);
-  };
-
-  const handleToday = () => {
-    const todayVal = new Date(2026, 4, 22);
-    setCursorDate(todayVal);
-    setSelectedDate(todayVal);
-  };
-
-  // Week-of Panel Navigation Handlers
-  const handleWeekPrev = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() - 7);
-    setSelectedDate(newDate);
-  };
-
-  const handleWeekNext = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + 7);
-    setSelectedDate(newDate);
-  };
-
-  // Get formatted Toolbar Title
-  const getNavLabel = () => {
-    if (view === 'year') {
-      return cursorDate.getFullYear();
-    } else if (view === 'quarter') {
-      const q = Math.floor(cursorDate.getMonth() / 3) + 1;
-      return `Q${q} ${cursorDate.getFullYear()}`;
-    } else if (view === 'gantt') {
-      const endD = new Date(cursorDate);
-      endD.setDate(cursorDate.getDate() + 27);
-      const fmt = (d) => `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
-      return `${fmt(cursorDate)} – ${fmt(endD)} ${endD.getFullYear()}`;
-    } else {
-      return `${MONTHS[cursorDate.getMonth()]} ${cursorDate.getFullYear()}`;
-    }
-  };
-
-  // Week Days calculation (Sun-Sat)
-  const weekDays = useMemo(() => {
-    const dow = selectedDate.getDay();
-    const sunday = new Date(selectedDate);
-    sunday.setDate(selectedDate.getDate() - dow);
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(sunday);
-      d.setDate(sunday.getDate() + i);
-      days.push(d);
-    }
-    return days;
-  }, [selectedDate]);
-
-  const getWeekLabel = () => {
-    if (weekDays.length < 7) return '';
-    const start = weekDays[0];
-    const end = weekDays[6];
-    const lblStart = start.getDate();
-    const lblEnd = end.getDate();
-    const lblMo1 = MONTHS_SHORT[start.getMonth()];
-    const lblMo2 = MONTHS_SHORT[end.getMonth()];
-    const sameMo = start.getMonth() === end.getMonth();
-    return sameMo
-      ? `${lblStart}–${lblEnd} ${lblMo1} ${start.getFullYear()}`
-      : `${lblStart} ${lblMo1} – ${lblEnd} ${lblMo2} ${start.getFullYear()}`;
-  };
-
-  // Filtered week programmes summary
-  const filteredWeekProgs = useMemo(() => {
-    return (weekData?.programmes || []).filter((prog) => {
-      if (trackFilter !== 'all' && prog.track !== trackFilter) return false;
-      if (clientFilter !== 'all' && prog.client !== clientFilter) return false;
-      return true;
-    });
-  }, [weekData, trackFilter, clientFilter]);
-
-  // Gantt Trainers Calculation
-  const ganttDays = useMemo(() => {
-    const daysArr = [];
-    for (let i = 0; i < 28; i++) {
-      const d = new Date(cursorDate);
-      d.setDate(cursorDate.getDate() + i);
-      daysArr.push(d);
-    }
-    return daysArr;
-  }, [cursorDate]);
-
-  const todayIndex = useMemo(() => {
-    const todayVal = new Date(2026, 4, 22);
-    return ganttDays.findIndex((d) => isSameDate(d, todayVal));
-  }, [ganttDays]);
-
-  const filteredTrainers = useMemo(() => {
-    return (ganttData?.trainers || [])
-      .filter((t) => {
-        // Name & ID search
-        const matchSearch = t.name.toLowerCase().includes(ganttSearch.toLowerCase()) ||
-                            t.id.toLowerCase().includes(ganttSearch.toLowerCase());
-        if (!matchSearch) return false;
-
-        // Engaged / All Toggle
-        if (trainerToggle === 'engaged' && (!t.bars || t.bars.length === 0)) {
-          return false;
-        }
-
-        return true;
+  // ---- Filter vocabularies derived from the live data ----
+  const { trackOpts, clientOpts } = useMemo(() => {
+    const tracks = new Set(), clients = new Set();
+    Object.values(calendarData).forEach((day) => {
+      (day.events || []).forEach((e) => {
+        if (e.track) tracks.add(e.track);
+        if (e.client) clients.add(e.client);
       });
-  }, [ganttData, ganttSearch, trainerToggle]);
+    });
+    const tOpts = [...tracks].sort().map((v) => ({ value: v, label: trackLabel(v) }));
+    const cOpts = [...clients].sort().map((v) => ({ value: v, label: clientLabel(v) }));
+    return { trackOpts: tOpts, clientOpts: cOpts };
+  }, [calendarData]);
 
-  // Generate 42 cells for the selected month grid
-  const monthCells = useMemo(() => {
-    const y = cursorDate.getFullYear();
-    const m = cursorDate.getMonth();
-    const firstDay = new Date(y, m, 1);
-    const startOffset = firstDay.getDay();
-
-    const cells = [];
-    for (let i = 0; i < 42; i++) {
-      const cellDate = new Date(y, m, i - startOffset + 1);
-      cells.push(cellDate);
+  // Filtered + grouped programmes for a given ISO date. Backend events are
+  // per-assignment (trainer × delivery × day), so we collapse them into one
+  // entry per delivery with its set of trainers for that day.
+  const dayData = useCallback((iso) => {
+    const raw = calendarData[iso] || { events: [] };
+    const filtered = (raw.events || []).filter((e) => {
+      if (trackF && e.track !== trackF) return false;
+      if (clientF && e.client !== clientF) return false;
+      return true;
+    });
+    const map = new Map();
+    for (const e of filtered) {
+      const key = e.delivery_id || e.name || JSON.stringify(e);
+      if (!map.has(key)) {
+        map.set(key, { name: e.name, delivery_id: e.delivery_id, campus: e.campus, track: e.track, client: e.client, trainers: new Set() });
+      }
+      if (e.trainer) map.get(key).trainers.add(e.trainer);
     }
-    return cells;
-  }, [cursorDate]);
+    const programmes = [...map.values()].map((g) => ({ ...g, trainers: [...g.trainers] }));
+    const trainerCount = new Set(filtered.map((e) => e.trainer).filter(Boolean)).size;
+    return { programmes, assignments: filtered.length, trainerCount };
+  }, [calendarData, trackF, clientF]);
 
-  // Dynamic Mini-Month Grid Generator for Quarter/Year views
-  const renderMiniMonth = (monthDate) => {
-    const y = monthDate.getFullYear();
-    const m = monthDate.getMonth();
-    const firstDay = new Date(y, m, 1);
-    const startOffset = firstDay.getDay();
+  const openDay = useCallback((d) => setModalDate(isoKey(d)), []);
 
-    const cells = [];
-    for (let i = 0; i < 42; i++) {
-      cells.push(new Date(y, m, i - startOffset + 1));
+  // ---- Navigation ----
+  const shift = (dir) => {
+    const d = new Date(cursor);
+    if (view === 'month') d.setMonth(d.getMonth() + dir);
+    else if (view === 'quarter') d.setMonth(d.getMonth() + dir * 3);
+    else if (view === 'year') d.setFullYear(d.getFullYear() + dir);
+    else if (view === 'week') d.setDate(d.getDate() + dir * 7);
+    else d.setDate(d.getDate() + dir * 28); // gantt
+    setCursor(d);
+    if (view === 'week') setSelected(d);
+  };
+  const goToday = () => { setCursor(new Date(TODAY)); setSelected(new Date(TODAY)); };
+
+  const navLabel = () => {
+    if (view === 'year') return `${cursorYear}`;
+    if (view === 'quarter') return `Q${Math.floor(cursor.getMonth() / 3) + 1} ${cursorYear}`;
+    if (view === 'gantt') {
+      const end = new Date(cursor); end.setDate(cursor.getDate() + 27);
+      const f = (d) => `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+      return `${f(cursor)} – ${f(end)} ${end.getFullYear()}`;
     }
-
-    return (
-      <div className="cal-mini" key={`${y}-${m}`}>
-        <div className="cal-mini-title">{MONTHS_SHORT[m]} {y}</div>
-        <div className="cal-mini-grid">
-          {DOW_S.map((d, idx) => (
-            <div className="cal-mini-dow" key={idx}>{d}</div>
-          ))}
-          {cells.map((cellDate, idx) => {
-            const cellDateStr = key(cellDate);
-            const inMonth = cellDate.getMonth() === m;
-            const isToday = isSameDate(cellDate, new Date(2026, 4, 22));
-
-            const rawDay = calendarData?.[cellDateStr] || { demand: 0, events: [] };
-            const filtered = getFilteredDayData(rawDay.events, rawDay.demand);
-            const lvl = loadLevel(filtered.demand);
-
-            return (
-              <div
-                key={idx}
-                className={`cal-mini-day ${lvl}${!inMonth ? ' out' : ''}${isToday ? ' today' : ''}`}
-                onClick={() => handleDayClick(cellDate)}
-                title={`${cellDate.toDateString()} · ${filtered.demand} demand`}
-              >
-                {cellDate.getDate()}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
+    if (view === 'week') {
+      const wd = weekDays(selected);
+      const s = wd[0], e = wd[6];
+      const same = s.getMonth() === e.getMonth();
+      return same
+        ? `${s.getDate()}–${e.getDate()} ${MONTHS_SHORT[s.getMonth()]} ${s.getFullYear()}`
+        : `${s.getDate()} ${MONTHS_SHORT[s.getMonth()]} – ${e.getDate()} ${MONTHS_SHORT[e.getMonth()]} ${s.getFullYear()}`;
+    }
+    return `${MONTHS[cursor.getMonth()]} ${cursorYear}`;
   };
 
-  const renderQuarterView = () => {
-    const y = cursorDate.getFullYear();
-    const qStart = Math.floor(cursorDate.getMonth() / 3) * 3;
-    const monthsArr = [];
-    for (let i = 0; i < 3; i++) {
-      monthsArr.push(new Date(y, qStart + i, 1));
-    }
-    return (
-      <div className="cal-quarter">
-        {monthsArr.map(renderMiniMonth)}
-      </div>
-    );
+  // ---- Export current view's events ----
+  const handleExport = () => {
+    const rows = [];
+    Object.keys(calendarData).sort().forEach((iso) => {
+      dayData(iso).programmes.forEach((p) => rows.push({ date: iso, ...p }));
+    });
+    if (!rows.length) return;
+    exportToExcel({
+      filename: 'calendar-programmes',
+      sheets: [{
+        name: 'Calendar',
+        columns: [
+          { header: 'Date', key: 'date' },
+          { header: 'Programme', key: 'name' },
+          { header: 'Delivery ID', key: 'delivery_id' },
+          { header: 'Track', value: (r) => trackLabel(r.track) },
+          { header: 'Client', value: (r) => clientLabel(r.client) },
+          { header: 'Campus', key: 'campus' },
+          { header: 'Trainers', value: (r) => (r.trainers || []).join(', ') || 'Unassigned' },
+          { header: 'Trainer Count', value: (r) => (r.trainers || []).length },
+        ],
+        rows,
+      }],
+    });
   };
 
-  const renderYearView = () => {
-    const y = cursorDate.getFullYear();
-    const monthsArr = [];
-    for (let i = 0; i < 12; i++) {
-      monthsArr.push(new Date(y, i, 1));
-    }
-    return (
-      <div className="cal-year">
-        {monthsArr.map(renderMiniMonth)}
-      </div>
-    );
-  };
+  if (error) {
+    return <ErrorPanel panelId="calendar" active={active}
+      error={error?.error || error?.message || 'Failed to load calendar data.'}
+      onRetry={() => window.location.reload()} />;
+  }
+  if (loadingYear && !yearRes) return <LoadingPanel panelId="calendar" active={active} />;
 
-  if (error) return <ErrorPanel panelId="calendar" active={active} error={error} onRetry={() => window.location.reload()} />;
-  if (loading && !calendarRes) return <LoadingPanel panelId="calendar" active={active} />;
+  const VIEWS = ['week', 'month', 'quarter', 'year', 'gantt'];
 
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel="calendar">
-      <style>{`
-        /* Compact calendar day cells */
-        .cal-day {
-          min-height: 76px !important;
-          padding: 5px 6px !important;
-          gap: 2px !important;
-        }
-        .cal-day-num {
-          font-size: 13px !important;
-        }
-        .cal-day-head {
-          margin-bottom: 2px !important;
-        }
-        .cal-day-tag {
-          font-size: 7px !important;
-          padding: 1.5px 3px !important;
-        }
-        .cal-events {
-          gap: 2px !important;
-        }
-        .cal-event {
-          font-size: 9.5px !important;
-          padding: 2.5px 5px !important;
-          margin-bottom: 1px !important;
-          line-height: 1.1 !important;
-        }
-        .cal-event-more {
-          font-size: 9px !important;
-          padding: 1px 0 !important;
-        }
-        .cal-day-bottom {
-          margin-top: auto !important;
-        }
-        .cal-day-load {
-          font-size: 9px !important;
-        }
-      `}</style>
-      <div className="card" style={{ marginBottom: '18px' }}>
-        {/* Track + Client filter chips */}
-        <div className="cal-filters">
-          <div className="cf-group">
-            <span className="cf-label">Track</span>
-            <div className="cf-chips">
-              {calendarTracks.map((tr) => (
-                <span
-                  key={tr.val}
-                  className={`cf-chip ${tr.val} ${trackFilter === tr.val ? 'active' : ''}`}
-                  onClick={() => setTrackFilter(tr.val)}
-                >
-                  {tr.label}
-                </span>
-              ))}
-            </div>
+      <div className="card gc-card">
+        {/* ---- Toolbar ---- */}
+        <div className="gc-toolbar">
+          <div className="gc-nav">
+            <button className="gc-nav-btn" onClick={() => shift(-1)} aria-label="Previous">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            </button>
+            <button className="gc-today" onClick={goToday}>Today</button>
+            <button className="gc-nav-btn" onClick={() => shift(1)} aria-label="Next">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+            </button>
+            <div className="gc-period">{navLabel()}</div>
           </div>
-          <div className="cf-group">
-            <span className="cf-label">Client</span>
-            <div className="cf-chips">
-              {calendarClients.map((cl) => (
-                <span
-                  key={cl.val}
-                  className={`cf-chip ${cl.val} ${clientFilter === cl.val ? 'active' : ''}`}
-                  onClick={() => setClientFilter(cl.val)}
-                >
-                  {cl.label}
-                </span>
+
+          <div className="gc-toolbar-right">
+            <SearchSelect label="Track"  value={trackF}  options={trackOpts}  onChange={setTrackF} />
+            <SearchSelect label="Client" value={clientF} options={clientOpts} onChange={setClientF} />
+            <button className="gc-export" onClick={handleExport} title="Export programmes to Excel">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Export
+            </button>
+            <div className="gc-views" role="tablist">
+              {VIEWS.map((v) => (
+                <button key={v} role="tab" aria-selected={view === v}
+                  className={`gc-view-btn${view === v ? ' is-active' : ''}`}
+                  onClick={() => setView(v)}>
+                  {v[0].toUpperCase() + v.slice(1)}
+                </button>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Calendar View Toggle & Nav Toolbar */}
-        <div style={{ marginTop: '14px' }}>
-          <div className="cal-toolbar">
-            <div className="cal-month-nav">
-              <button className="cal-nav-btn" onClick={handlePrev} aria-label="Previous">
-                <svg viewBox="0 0 24 24" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
+        {/* ---- View body ---- */}
+        <div className="gc-body">
+          {loadingYear && !yearRes ? (
+            <div className="gc-loading">Loading…</div>
+          ) : view === 'month'   ? <MonthView  cursor={cursor} dayData={dayData} onDay={openDay} />
+            : view === 'week'    ? <WeekView   selected={selected} dayData={dayData} onDay={openDay} />
+            : view === 'quarter' ? <MiniGrid   months={quarterMonths(cursor)} cols={3} dayData={dayData} onDay={openDay} />
+            : view === 'year'    ? <MiniGrid   months={yearMonths(cursorYear)} cols={4} dayData={dayData} onDay={openDay} />
+            : <GanttView gantt={ganttRes} loading={loadingGantt} cursor={cursor}
+                         search={ganttSearch} setSearch={setGanttSearch}
+                         toggle={trainerToggle} setToggle={setTrainerToggle} />}
+        </div>
+
+        {/* ---- Legend ---- */}
+        {view !== 'gantt' && (
+          <div className="gc-legend">
+            <span className="gc-legend-title">Clients</span>
+            {Object.entries(CLIENT_META).filter(([k]) => k !== 'other').map(([k, m]) => (
+              <button key={k} type="button"
+                className={`gc-legend-item${clientF === k ? ' is-active' : ''}`}
+                onClick={() => setClientF(clientF === k ? '' : k)}>
+                <span className="gc-legend-dot" style={{ background: m.color, boxShadow: `0 0 6px ${m.color}88` }} />
+                {m.label}
               </button>
-              <div className="cal-month-label">{getNavLabel()}</div>
-              <button className="cal-nav-btn" onClick={handleNext} aria-label="Next">
-                <svg viewBox="0 0 24 24" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </button>
-              <button className="cal-today-btn" onClick={handleToday}>Today</button>
-            </div>
-            <div className="cal-view-toggle">
-              <button className={view === 'month' ? 'active' : ''} onClick={() => setView('month')}>Month</button>
-              <button className={view === 'quarter' ? 'active' : ''} onClick={() => setView('quarter')}>Quarter</button>
-              <button className={view === 'year' ? 'active' : ''} onClick={() => setView('year')}>Year</button>
-              <button className={view === 'gantt' ? 'active' : ''} onClick={() => setView('gantt')}>Gantt</button>
-            </div>
-          </div>
-
-          <div className="cal-wrap">
-            {loading ? (
-              <div style={{ padding: '60px 0', display: 'flex', justifyContent: 'center', width: '100%' }}>
-                <span style={{ font: '600 13px var(--font)', color: 'var(--text-muted)' }}>Refreshing Calendar...</span>
-              </div>
-            ) : view === 'month' ? (
-              <div className="cal-month">
-                {DOW.map((d, idx) => (
-                  <div key={idx} className={`cal-dow${idx === 0 || idx === 6 ? ' we' : ''}`}>{d}</div>
-                ))}
-                {monthCells.map((cellDate, idx) => {
-                  const cellDateStr = key(cellDate);
-                  const isToday = isSameDate(cellDate, new Date(2026, 4, 22));
-                  const inMonth = cellDate.getMonth() === cursorDate.getMonth();
-                  const isWeekend = cellDate.getDay() === 0 || cellDate.getDay() === 6;
-
-                  const rawDay = calendarData?.[cellDateStr] || { demand: 0, events: [] };
-                  const filtered = getFilteredDayData(rawDay.events, rawDay.demand);
-
-                  let stateCls = '';
-                  if (!inMonth) stateCls += ' out';
-                  if (isWeekend) stateCls += ' weekend';
-                  if (isToday) stateCls += ' today';
-                  if (filtered.demand > CAPACITY) stateCls += ' over';
-                  else if (filtered.demand >= 35) stateCls += ' warn';
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`cal-day${stateCls}`}
-                      onClick={() => handleDayClick(cellDate)}
-                    >
-                      <div className="cal-day-head">
-                        <div className="cal-day-num">{cellDate.getDate()}</div>
-                        {filtered.demand > CAPACITY ? (
-                          <span className="cal-day-tag over">OVER</span>
-                        ) : filtered.demand >= 35 ? (
-                          <span className="cal-day-tag warn">PEAK</span>
-                        ) : null}
-                      </div>
-
-                      <div className="cal-events">
-                        {filtered.events.slice(0, 3).map((evt, evtIdx) => (
-                          <div key={evtIdx} className={`cal-event ${clientClass(evt.client)}`} title={`${evt.name} · ${CLIENT_META[evt.client]?.label || evt.client}`}>
-                            {cleanEventName(evt.name)}
-                          </div>
-                        ))}
-                        {filtered.events.length > 3 && (
-                          <div className="cal-event-more">+{filtered.events.length - 3} more</div>
-                        )}
-                      </div>
-
-                      {filtered.demand > 0 && (
-                        <div className="cal-day-bottom">
-                          <span className={`cal-day-load ${filtered.demand > CAPACITY ? 'over' : filtered.demand >= 35 ? 'warn' : ''}`}>
-                            {filtered.demand} / {CAPACITY}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : view === 'quarter' ? (
-              renderQuarterView()
-            ) : view === 'year' ? (
-              renderYearView()
-            ) : view === 'gantt' ? (
-              <div className="cal-gantt">
-                {/* Gantt Search Bar */}
-                <div className="cgg-search-bar">
-                  <div className="input-wrap" style={{ width: '340px' }}>
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="11" cy="11" r="8" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                    <input
-                      className="input"
-                      placeholder="Search trainer by name or ID..."
-                      value={ganttSearch}
-                      onChange={(e) => setGanttSearch(e.target.value)}
-                    />
-                  </div>
-                  <div className="cgg-engage-toggle">
-                    <button
-                      className={trainerToggle === 'engaged' ? 'active' : ''}
-                      onClick={() => setTrainerToggle('engaged')}
-                    >
-                      Engaged
-                    </button>
-                    <button
-                      className={trainerToggle === 'all' ? 'active' : ''}
-                      onClick={() => setTrainerToggle('all')}
-                    >
-                      All
-                    </button>
-                  </div>
-                  <div className="cgg-engage-meta">
-                    <b>{filteredTrainers.length}</b> trainers · <b>28</b> days
-                  </div>
-                </div>
-
-                {/* Gantt Day Header Row */}
-                <div className="cgg-head">
-                  <div className="cgg-head-trainer">Trainer</div>
-                  {ganttDays.map((d, i) => {
-                    const isWE = d.getDay() === 0 || d.getDay() === 6;
-                    const isTd = isSameDate(d, new Date(2026, 4, 22));
-                    return (
-                      <div key={i} className={`cgg-head-day${isWE ? ' weekend' : ''}${isTd ? ' today' : ''}`}>
-                        {DOW[d.getDay()][0]}
-                        <strong>{d.getDate()}</strong>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Gantt Trainer Rows */}
-                {filteredTrainers.length === 0 ? (
-                  <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', font: '600 12px var(--font)' }}>
-                    No engaged trainers found.
-                  </div>
-                ) : (
-                  filteredTrainers.map((t, idx) => (
-                    <div className="cgg-row" key={t.id || idx}>
-                      <div className="cgg-row-name">
-                        <span className="n">{t.name}</span>
-                        <span className="s">{t.id} · {t.type || 'Internal'}</span>
-                      </div>
-                      <div className="cgg-row-track">
-                        {t.bars?.map((bar, barIdx) => (
-                          <div
-                            key={barIdx}
-                            className={`cgg-bar c-${bar.client || 'other'}`}
-                            style={{ gridColumn: `${bar.start_day} / span ${bar.span}` }}
-                            title={`${bar.programme} · ${CLIENT_META[bar.client]?.label || bar.client || 'Unknown Client'}`}
-                          >
-                            {bar.programme}
-                          </div>
-                        ))}
-                        {todayIndex !== -1 && (
-                          <div
-                            className="cgg-today-line"
-                            style={{
-                              gridColumn: `${todayIndex + 1} / span 1`,
-                              left: 0
-                            }}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : null}
-          </div>
-
-          {/* Color-coding Legend */}
-          {view !== 'gantt' && (
-            <div className="cal-legend">
-              <div className="cal-leg-item"><span className="sw idle"></span>0–10 demand</div>
-              <div className="cal-leg-item"><span className="sw light"></span>10–20</div>
-              <div className="cal-leg-item"><span className="sw mid"></span>20–35</div>
-              <div className="cal-leg-item"><span className="sw warn"></span>35–42 (near capacity)</div>
-              <div className="cal-leg-item"><span className="sw over"></span>Over capacity</div>
-              <div className="cal-leg-item" style={{ marginLeft: 'auto' }}>
-                <span className="sw today-leg"></span>Today
-              </div>
-              <div className="cal-leg-item"><span className="sw weekend-leg"></span>Weekend</div>
-            </div>
-          )}
-
-          {/* Client Color Legend */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap',
-            padding: '10px 14px',
-            background: 'var(--bg-primary)',
-            borderRadius: '8px',
-            marginTop: '8px',
-          }}>
-            <span style={{ font: '800 9px/1 var(--font)', textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--text-muted)', marginRight: '4px' }}>Client Colors</span>
-            {Object.entries(CLIENT_META).filter(([k]) => k !== 'other').map(([key, meta]) => (
-              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}
-                onClick={() => setClientFilter(clientFilter === key ? 'all' : key)}>
-                <span style={{
-                  width: '10px', height: '10px', borderRadius: '50%',
-                  background: meta.color,
-                  boxShadow: `0 0 6px ${meta.color}88`,
-                  display: 'inline-block',
-                  flexShrink: 0,
-                  outline: clientFilter === key ? `2px solid ${meta.color}` : 'none',
-                  outlineOffset: '2px',
-                }} />
-                <span style={{
-                  font: '700 10px/1 var(--font)',
-                  color: clientFilter === key ? meta.color : 'var(--text-muted)',
-                  transition: 'color 0.15s',
-                }}>{meta.label}</span>
-              </div>
             ))}
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Week-of Refocus Panel */}
-      <div className="card" id="weekGridSection">
-        <div className="section-head">
-          <div>
-            <div className="section-title">
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" />
-                <path d="M16 2v4M8 2v4M3 10h18" />
-              </svg>
-              Week of{' '}
-              <span id="weekLabel" style={{ color: 'var(--accent-text)', marginLeft: '6px' }}>
-                {getWeekLabel()}
-              </span>
-            </div>
-            <div className="section-sub" style={{ marginTop: '6px' }}>
-              Click any day on the calendar above to refocus the week here
+      {modalDate && (
+        <DayDetailModal
+          iso={modalDate}
+          data={dayData(modalDate)}
+          deliveryById={deliveryById}
+          onClose={() => setModalDate(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+/* ============================================================
+   Date helpers
+   ============================================================ */
+function weekDays(anchor) {
+  const dow = anchor.getDay();
+  const sun = new Date(anchor); sun.setDate(anchor.getDate() - dow);
+  return Array.from({ length: 7 }, (_, i) => { const d = new Date(sun); d.setDate(sun.getDate() + i); return d; });
+}
+function monthCells(year, month) {
+  const first = new Date(year, month, 1);
+  const offset = first.getDay();
+  return Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
+}
+function quarterMonths(cursor) {
+  const y = cursor.getFullYear(), qs = Math.floor(cursor.getMonth() / 3) * 3;
+  return Array.from({ length: 3 }, (_, i) => new Date(y, qs + i, 1));
+}
+function yearMonths(year) {
+  return Array.from({ length: 12 }, (_, i) => new Date(year, i, 1));
+}
+
+/* ============================================================
+   Month view
+   ============================================================ */
+function MonthView({ cursor, dayData, onDay }) {
+  const cells = monthCells(cursor.getFullYear(), cursor.getMonth());
+  return (
+    <div className="gc-month">
+      {DOW.map((d, i) => (
+        <div key={d} className={`gc-month-dow${i === 0 || i === 6 ? ' we' : ''}`}>{d}</div>
+      ))}
+      {cells.map((d, i) => {
+        const iso = isoKey(d);
+        const { programmes } = dayData(iso);
+        const inMonth = d.getMonth() === cursor.getMonth();
+        const isToday = sameDate(d, TODAY);
+        const we = d.getDay() === 0 || d.getDay() === 6;
+        return (
+          <div key={i}
+            className={`gc-cell${inMonth ? '' : ' out'}${we ? ' we' : ''}${isToday ? ' today' : ''}`}
+            onClick={() => onDay(d)}>
+            <div className="gc-cell-num">{d.getDate()}</div>
+            <div className="gc-cell-events">
+              {programmes.slice(0, 3).map((p, ei) => (
+                <div key={ei} className="gc-chip" style={{ '--c': clientColor(p.client) }}
+                  title={`${p.name} · ${clientLabel(p.client)} · ${p.trainers.length} trainer(s)`}>
+                  <span className="gc-chip-dot" />
+                  <span className="gc-chip-txt">{cleanEventName(p.name)}</span>
+                </div>
+              ))}
+              {programmes.length > 3 && <div className="gc-more">+{programmes.length - 3} more</div>}
             </div>
           </div>
-          <div className="section-actions">
-            <button className="cal-nav-btn" onClick={handleWeekPrev} aria-label="Previous week">
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-            </button>
-            <button className="cal-nav-btn" onClick={handleWeekNext} aria-label="Next week">
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================
+   Week view — 7 day columns
+   ============================================================ */
+function WeekView({ selected, dayData, onDay }) {
+  const days = weekDays(selected);
+  return (
+    <div className="gc-week">
+      {days.map((d, i) => {
+        const iso = isoKey(d);
+        const { programmes } = dayData(iso);
+        const isToday = sameDate(d, TODAY);
+        const we = d.getDay() === 0 || d.getDay() === 6;
+        return (
+          <div key={i} className={`gc-week-col${we ? ' we' : ''}${isToday ? ' today' : ''}`} onClick={() => onDay(d)}>
+            <div className="gc-week-head">
+              <span className="gc-week-dow">{DOW[d.getDay()]}</span>
+              <span className="gc-week-num">{d.getDate()}</span>
+            </div>
+            <div className="gc-week-events">
+              {programmes.length === 0 ? (
+                <div className="gc-week-empty">—</div>
+              ) : programmes.map((p, ei) => (
+                <div key={ei} className="gc-wchip" style={{ '--c': clientColor(p.client) }}
+                  title={`${p.name} · ${clientLabel(p.client)} · ${p.trainers.length} trainer(s)`}>
+                  <span className="gc-wchip-name">{cleanEventName(p.name)}</span>
+                  <span className="gc-wchip-sub">{p.trainers.length} trainer{p.trainers.length === 1 ? '' : 's'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================
+   Quarter / Year — grid of mini-months
+   ============================================================ */
+function MiniGrid({ months, cols, dayData, onDay }) {
+  return (
+    <div className="gc-mini-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+      {months.map((mDate) => {
+        const y = mDate.getFullYear(), m = mDate.getMonth();
+        const cells = monthCells(y, m);
+        return (
+          <div className="gc-mini" key={`${y}-${m}`}>
+            <div className="gc-mini-title">{MONTHS_SHORT[m]} {y}</div>
+            <div className="gc-mini-week">{DOW_S.map((d, i) => <span key={i}>{d}</span>)}</div>
+            <div className="gc-mini-days">
+              {cells.map((d, i) => {
+                const { programmes, assignments } = dayData(isoKey(d));
+                const inMonth = d.getMonth() === m;
+                const isToday = sameDate(d, TODAY);
+                const lvl = assignments === 0 ? 'l0' : assignments > CAPACITY ? 'l5' : assignments >= 35 ? 'l4' : assignments >= 20 ? 'l3' : assignments >= 10 ? 'l2' : 'l1';
+                return (
+                  <button key={i} type="button"
+                    className={`gc-mini-day ${lvl}${inMonth ? '' : ' out'}${isToday ? ' today' : ''}`}
+                    title={`${d.toDateString()} · ${programmes.length} programme(s) · ${assignments} assignment(s)`}
+                    onClick={() => onDay(d)}>
+                    {d.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================
+   Gantt view (trainer × day)
+   ============================================================ */
+function GanttView({ gantt, loading, cursor, search, setSearch, toggle, setToggle }) {
+  const days = useMemo(
+    () => Array.from({ length: 28 }, (_, i) => { const d = new Date(cursor); d.setDate(cursor.getDate() + i); return d; }),
+    [cursor],
+  );
+  const todayIdx = days.findIndex((d) => sameDate(d, TODAY));
+
+  const trainers = useMemo(() => {
+    return (gantt?.trainers || []).filter((t) => {
+      const q = search.toLowerCase();
+      const match = t.name.toLowerCase().includes(q) || (t.id || '').toLowerCase().includes(q);
+      if (!match) return false;
+      if (toggle === 'engaged' && (!t.bars || t.bars.length === 0)) return false;
+      return true;
+    });
+  }, [gantt, search, toggle]);
+
+  if (loading && !gantt) return <div className="gc-loading">Loading Gantt…</div>;
+
+  return (
+    <div className="cal-gantt">
+      <div className="cgg-search-bar">
+        <div className="input-wrap" style={{ width: '340px' }}>
+          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+          <input className="input" placeholder="Search trainer by name or ID…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="cgg-engage-toggle">
+          <button className={toggle === 'engaged' ? 'active' : ''} onClick={() => setToggle('engaged')}>Engaged</button>
+          <button className={toggle === 'all' ? 'active' : ''} onClick={() => setToggle('all')}>All</button>
+        </div>
+        <div className="cgg-engage-meta"><b>{trainers.length}</b> trainers · <b>28</b> days</div>
+      </div>
+
+      <div className="cgg-head">
+        <div className="cgg-head-trainer">Trainer</div>
+        {days.map((d, i) => {
+          const we = d.getDay() === 0 || d.getDay() === 6;
+          const td = sameDate(d, TODAY);
+          return <div key={i} className={`cgg-head-day${we ? ' weekend' : ''}${td ? ' today' : ''}`}>{DOW[d.getDay()][0]}<strong>{d.getDate()}</strong></div>;
+        })}
+      </div>
+
+      {trainers.length === 0 ? (
+        <div className="gc-loading">No engaged trainers in this window.</div>
+      ) : trainers.map((t, idx) => (
+        <div className="cgg-row" key={`${t.id || 't'}-${idx}`}>
+          <div className="cgg-row-name">
+            <span className="n">{t.name}</span>
+            <span className="s">{t.id} · {t.type || 'Internal'}</span>
+          </div>
+          <div className="cgg-row-track">
+            {t.bars?.map((bar, bi) => (
+              <div key={bi} className={`cgg-bar c-${bar.client || 'other'}`}
+                style={{ gridColumn: `${bar.start_day} / span ${bar.span}` }}
+                title={`${bar.programme} · ${trackLabel(bar.track)}`}>
+                {bar.programme}
+              </div>
+            ))}
+            {todayIdx !== -1 && <div className="cgg-today-line" style={{ gridColumn: `${todayIdx + 1} / span 1`, left: 0 }} />}
           </div>
         </div>
+      ))}
+    </div>
+  );
+}
 
-        {loadingWeek ? (
-          <div style={{ padding: '40px 0', display: 'flex', justifyContent: 'center', width: '100%' }}>
-            <span style={{ font: '600 13px var(--font)', color: 'var(--text-muted)' }}>Refreshing Week View...</span>
-          </div>
+/* ============================================================
+   Searchable dropdown filter (reuses .rq-select styling)
+   ============================================================ */
+function SearchSelect({ label, value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return options;
+    const n = q.trim().toLowerCase();
+    return options.filter((o) => o.label.toLowerCase().includes(n));
+  }, [options, q]);
+
+  const selectedLabel = options.find((o) => o.value === value)?.label;
+
+  return (
+    <div ref={ref} className={`rq-select${open ? ' is-open' : ''}${value ? ' is-set' : ''}`}>
+      <button type="button" className="rq-select-trigger" onClick={() => setOpen((v) => !v)}>
+        <span className="rq-select-label">{label}</span>
+        <span className="rq-select-value">{selectedLabel || 'All'}</span>
+        {value ? (
+          <span className="rq-select-clear" role="button" aria-label={`Clear ${label}`}
+            onClick={(e) => { e.stopPropagation(); onChange(''); setQ(''); }}>×</span>
         ) : (
-          <>
-            <div className="week-grid" id="weekGrid">
-              {weekDays.map((d, idx) => {
-                const dateStr = key(d);
-                const isToday = isSameDate(d, new Date(2026, 4, 22));
-                const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rq-select-caret"><polyline points="6 9 12 15 18 9" /></svg>
+        )}
+      </button>
+      {open && (
+        <div className="rq-select-menu">
+          <div className="rq-select-search">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${label.toLowerCase()}…`} />
+          </div>
+          <div className="rq-select-list">
+            <button type="button" className={`rq-select-opt${!value ? ' is-active' : ''}`} onClick={() => { onChange(''); setOpen(false); setQ(''); }}>All</button>
+            {filtered.length === 0 ? (
+              <div className="rq-select-empty">No matches</div>
+            ) : filtered.map((opt) => (
+              <button key={opt.value} type="button"
+                className={`rq-select-opt${value === opt.value ? ' is-active' : ''}`}
+                onClick={() => { onChange(opt.value); setOpen(false); setQ(''); }} title={opt.label}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="rq-select-foot">{filtered.length} option{filtered.length === 1 ? '' : 's'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-                const backendDay = weekData?.week_data?.find((wd) => wd.date === dateStr) || { demand: 0, events: [] };
-                const filtered = getFilteredDayData(backendDay.events, backendDay.demand);
+/* ============================================================
+   Day detail modal — all programmes for the clicked date
+   ============================================================ */
+function DayDetailModal({ iso, data, deliveryById, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
-                let stateCls = '';
-                if (isWeekend) stateCls += ' weekend';
-                if (isToday) stateCls += ' today';
-                if (filtered.demand > CAPACITY) stateCls += ' over';
-                else if (filtered.demand >= 35) stateCls += ' warn';
+  const { programmes, assignments, trainerCount } = data;
+  const dateObj = new Date(iso);
+  const niceDate = dateObj.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-                const demandPct = Math.min((filtered.demand / CAPACITY) * 100, 100);
-                const taPct = Math.min((filtered.events.length * 8 / CAPACITY) * 100, 100);
+  return (
+    <div className="oa-det-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="oa-det-panel" role="dialog" aria-modal="true" aria-label={`Programmes on ${niceDate}`}>
+        <div className="oa-det-head">
+          <div className="oa-det-avatar" style={{ background: 'linear-gradient(135deg,#06b6d4,#3b82f6)' }}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ stroke: '#fff' }}>
+              <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+          </div>
+          <div className="oa-det-info">
+            <div className="oa-det-name">{niceDate}</div>
+            <div className="oa-det-sub">
+              <span className="oa-tbl-avail oa-avail-full">{programmes.length} programme{programmes.length === 1 ? '' : 's'}</span>
+              <span className="oa-tbl-pool oa-pool-int">{trainerCount} trainer{trainerCount === 1 ? '' : 's'}</span>
+              <span className="oa-tbl-pool oa-pool-frl">{assignments} assignment{assignments === 1 ? '' : 's'}</span>
+            </div>
+          </div>
+          <button type="button" className="oa-det-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
 
+        <div className="oa-det-body">
+          {programmes.length === 0 ? (
+            <div className="gc-day-empty">No programmes scheduled for this date (with the current filters).</div>
+          ) : (
+            <div className="gc-day-list">
+              {programmes.map((p, i) => {
+                const del = deliveryById.get(p.delivery_id);
+                const dayTrainers = p.trainers || [];
                 return (
-                  <div
-                    key={idx}
-                    className={`wd-cell${stateCls}`}
-                    onClick={() => setSelectedDate(d)}
-                  >
-                    <div className="wd-head">
-                      <span className="wd-dow">{DOW[d.getDay()]}</span>
-                      <span className="wd-num">{d.getDate()}</span>
-                    </div>
-                    <div className="wd-bar-stack">
-                      <div className="wd-bar demand"><i style={{ width: `${demandPct}%` }}></i></div>
-                      <div className="wd-bar ta"><i style={{ width: `${taPct}%` }}></i></div>
-                    </div>
-                    <div className="wd-stats">
-                      <span>
-                        <span className={`wd-stat-num ${filtered.demand > CAPACITY ? 'over' : filtered.demand >= 35 ? 'warn' : ''}`}>
-                          {filtered.demand}
-                        </span>{' '}
-                        <span className="wd-stat-lab">DEM</span>
-                      </span>
-                      <span>
-                        <span className="wd-stat-num">{filtered.events.length}</span>{' '}
-                        <span className="wd-stat-lab">PROG</span>
-                      </span>
-                    </div>
-                    <div className="wd-progs">
-                      {filtered.events.slice(0, 2).map((evt, evtIdx) => (
-                        <div key={evtIdx} className={`wd-prog-chip ${clientClass(evt.client)}`} title={`${evt.name} · ${CLIENT_META[evt.client]?.label || evt.client}`}>
-                          {cleanEventName(evt.name)}
+                  <div key={i} className="gc-day-item" style={{ '--c': clientColor(p.client) }}>
+                    <div className="gc-day-item-bar" />
+                    <div className="gc-day-item-body">
+                      <div className="gc-day-item-title">{p.name || '—'}</div>
+                      <div className="gc-day-item-chips">
+                        <span className="gc-tag" style={{ color: clientColor(p.client), borderColor: clientColor(p.client) + '55' }}>{clientLabel(p.client)}</span>
+                        <span className="gc-tag gc-tag-track">{trackLabel(p.track)}</span>
+                        {p.delivery_id && <span className="gc-tag gc-tag-id">{p.delivery_id}</span>}
+                        {del?.status && <span className="gc-tag gc-tag-status">{del.status}</span>}
+                      </div>
+                      <div className="gc-day-item-grid">
+                        <Field label="Trainers on day" value={dayTrainers.length || 'Unassigned'} />
+                        <Field label="Campus" value={p.campus || del?.campus || '—'} />
+                        {del && <Field label="Window" value={`${fmtFullDate(del.start_date)} → ${fmtFullDate(del.end_date)}`} />}
+                        {del && (del.filled_slots != null || del.total_slots != null) && (
+                          <Field label="Slots filled" value={`${del.filled_slots ?? 0} / ${del.total_slots ?? 0}`} />
+                        )}
+                        {del?.ta_count != null && <Field label="TAs" value={del.ta_count} />}
+                        {del?.risk_level && <Field label="Risk" value={del.risk_level} />}
+                      </div>
+                      {dayTrainers.length > 0 && (
+                        <div className="gc-day-trainers">
+                          {dayTrainers.slice(0, 16).map((t, ti) => (
+                            <span key={`${t}-${ti}`} className="gc-trainer-chip">{t}</span>
+                          ))}
+                          {dayTrainers.length > 16 && <span className="gc-trainer-more">+{dayTrainers.length - 16}</span>}
                         </div>
-                      ))}
-                      {filtered.events.length > 2 && (
-                        <div className="wd-prog-more">+{filtered.events.length - 2}</div>
                       )}
                     </div>
                   </div>
                 );
               })}
             </div>
-
-            <div style={{ marginTop: '18px' }}>
-              <div className="kpi-label" style={{ marginBottom: '10px' }}>PROGRAMMES RUNNING THIS WEEK</div>
-              <div className="week-progs" id="weekProgs">
-                {filteredWeekProgs.length === 0 ? (
-                  <div style={{ padding: '14px', color: 'var(--text-muted)', font: '600 12px var(--font)', textAlign: 'center', width: '100%' }}>
-                    No programmes match the current track + client filter.
-                  </div>
-                ) : (
-                  filteredWeekProgs.map((p, idx) => (
-                    <button
-                      type="button"
-                      className={`wp-card wp-card-btn ${clientClass(p.client)}`}
-                      key={p.delivery_id || idx}
-                      onClick={() => p.delivery_id && setProgDetailId(p.delivery_id)}
-                      title="Click for details"
-                    >
-                      <div className="wp-bar"></div>
-                      <div className="wp-body">
-                        <div className="wp-name" title={p.name}>{p.name}</div>
-                        <div className="wp-code" style={{ color: CLIENT_META[p.client]?.color || 'var(--text-muted)' }}>
-                          {CLIENT_META[p.client]?.label || p.client?.toUpperCase()} · {p.track?.toUpperCase()}
-                        </div>
-                        <div className="wp-meta">
-                          <span><b>{p.days_this_week}</b> days this week</span>
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
-
-      <ProgrammeDetailModal
-        progId={progDetailId}
-        progFromWeek={filteredWeekProgs.find((p) => p.delivery_id === progDetailId)}
-        delivery={progDetailId ? deliveryByIdMap.get(progDetailId) : null}
-        onClose={() => setProgDetailId(null)}
-      />
-    </section>
+    </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Programme detail modal — opens when a "Programmes Running This Week" card
-// is clicked. Pulls the matching delivery from /deliveries (already cached
-// in the Redux store) for the rich detail; falls back to the week summary
-// when the delivery isn't found.
-// ---------------------------------------------------------------------------
-function ProgrammeDetailModal({ progId, progFromWeek, delivery, onClose }) {
-  if (!progId) return null;
-
-  const fmtDate = (iso) => {
-    if (!iso) return '—';
-    try {
-      return new Date(iso).toLocaleDateString('en-GB', {
-        weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
-      });
-    } catch {
-      return iso;
-    }
-  };
-
-  const dayCount = (s, e) => {
-    if (!s || !e) return null;
-    try {
-      const diff = Math.round((new Date(e) - new Date(s)) / 864e5) + 1;
-      return diff > 0 ? diff : null;
-    } catch { return null; }
-  };
-
-  const name = delivery?.course_name || progFromWeek?.name || progId;
-  const client = delivery?.campus || progFromWeek?.client || '—';
-  const track = progFromWeek?.track?.toUpperCase() || '—';
-  const status = delivery?.status || 'Unknown';
-  const startDate = delivery?.start_date;
-  const endDate = delivery?.end_date;
-  const totalDays = dayCount(startDate, endDate);
-  const daysThisWeek = progFromWeek?.days_this_week ?? null;
-  const trainers = delivery?.trainers || [];
-  const trainerCount = delivery?.trainer_count ?? trainers.length;
-  const taCount = delivery?.ta_count ?? 0;
-  const totalSlots = delivery?.total_slots ?? 0;
-  const filledSlots = delivery?.filled_slots ?? 0;
-  const gap = delivery?.gap ?? null;
-  const risk = delivery?.risk_level || null;
-
-  const statusTone = (() => {
-    const s = (status || '').toLowerCase();
-    if (s === 'completed' || s === 'training completed') return 'ok';
-    if (s === 'ongoing') return 'live';
-    if (s === 'upcoming') return 'warn';
-    return 'neutral';
-  })();
-  const riskTone = (risk || '').toLowerCase() === 'high'
-    ? 'err'
-    : (risk || '').toLowerCase() === 'med' ? 'warn' : 'ok';
-
+function Field({ label, value }) {
   return (
-    <div className="prog-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="prog-panel" onClick={(e) => e.stopPropagation()}>
-        <header className="prog-head">
-          <div className="prog-head-icon">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" />
-              <path d="M16 2v4M8 2v4M3 10h18" />
-            </svg>
-          </div>
-          <div className="prog-head-meta">
-            <div className="prog-head-title">{name}</div>
-            <div className="prog-head-sub">
-              <span className="prog-id">{progId}</span>
-              <span className="dot-sep">·</span>
-              <span>{client}</span>
-              {track !== '—' && (
-                <>
-                  <span className="dot-sep">·</span>
-                  <span>{track}</span>
-                </>
-              )}
-            </div>
-          </div>
-          <button type="button" className="prog-close" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </header>
-
-        <div className="prog-body">
-          {/* Status row */}
-          <div className="prog-row">
-            <span className={`prog-chip prog-chip-${statusTone}`}>{status}</span>
-            {risk && <span className={`prog-chip prog-chip-${riskTone}`}>Risk · {risk}</span>}
-            {daysThisWeek != null && (
-              <span className="prog-chip prog-chip-neutral">{daysThisWeek} days this week</span>
-            )}
-          </div>
-
-          {/* Date span */}
-          <div className="prog-grid">
-            <div className="prog-stat">
-              <div className="prog-stat-key">START DATE</div>
-              <div className="prog-stat-val">{fmtDate(startDate)}</div>
-            </div>
-            <div className="prog-stat">
-              <div className="prog-stat-key">END DATE</div>
-              <div className="prog-stat-val">{fmtDate(endDate)}</div>
-            </div>
-            <div className="prog-stat">
-              <div className="prog-stat-key">DURATION</div>
-              <div className="prog-stat-val">{totalDays != null ? `${totalDays} days` : '—'}</div>
-            </div>
-          </div>
-
-          {/* Allocation summary */}
-          <div className="prog-grid">
-            <div className="prog-stat">
-              <div className="prog-stat-key">TRAINERS</div>
-              <div className="prog-stat-val">{trainerCount}</div>
-            </div>
-            <div className="prog-stat">
-              <div className="prog-stat-key">TAs</div>
-              <div className="prog-stat-val">{taCount}</div>
-            </div>
-            <div className="prog-stat">
-              <div className="prog-stat-key">SLOTS FILLED</div>
-              <div className="prog-stat-val">
-                {filledSlots} <span className="prog-stat-of">/ {totalSlots}</span>
-              </div>
-            </div>
-            {gap != null && gap > 0 && (
-              <div className="prog-stat prog-stat-warn">
-                <div className="prog-stat-key">GAP</div>
-                <div className="prog-stat-val">{gap}</div>
-              </div>
-            )}
-          </div>
-
-          {/* Trainers list */}
-          {trainers.length > 0 && (
-            <div className="prog-section">
-              <div className="prog-section-head">
-                Trainers Allocated <span className="prog-section-count">{trainers.length}</span>
-              </div>
-              <div className="prog-trainers">
-                {trainers.slice(0, 30).map((t, i) => (
-                  <span key={`${t}-${i}`} className="prog-trainer-chip">
-                    <span className="prog-trainer-dot" />
-                    {t}
-                  </span>
-                ))}
-                {trainers.length > 30 && (
-                  <span className="prog-trainer-more">+{trainers.length - 30} more</span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {trainers.length === 0 && delivery && (
-            <div className="prog-empty">
-              No trainers allocated yet for this delivery.
-            </div>
-          )}
-
-          {!delivery && (
-            <div className="prog-empty">
-              Detailed delivery record not yet loaded for <strong>{progId}</strong>. Showing what's available from the week summary.
-            </div>
-          )}
-        </div>
-
-        <footer className="prog-foot">
-          <button type="button" className="prog-foot-ghost" onClick={onClose}>Close</button>
-        </footer>
-      </div>
+    <div className="oa-det-contact-row">
+      <span className="oa-det-contact-label">{label}</span>
+      <span className="oa-det-contact-value">{value}</span>
     </div>
   );
 }
