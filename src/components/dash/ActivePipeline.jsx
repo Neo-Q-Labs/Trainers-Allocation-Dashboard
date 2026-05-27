@@ -81,15 +81,28 @@ const FILTERS = [
   { id: 'open', label: 'OPEN' },
 ];
 
-export default function ActivePipeline({ rows = [], onOpen }) {
+export default function ActivePipeline({ rows = [], onOpen, rangeStart, rangeEnd }) {
   const [filter, setFilter] = useState('all');
   const [showAll, setShowAll] = useState(false);
+
+  // Optional date-range overlap window (from the Dashboard filter).
+  const rangeStartMs = rangeStart ? new Date(rangeStart).getTime() : null;
+  const rangeEndMs   = rangeEnd   ? new Date(rangeEnd).getTime()   : null;
 
   const summaries = useMemo(() => {
     return (rows || [])
       .map(summarise)
-      .filter((s) => s.delivery_id || s.client || s.course);
-  }, [rows]);
+      .filter((s) => s.delivery_id || s.client || s.course)
+      .filter((s) => {
+        // When a range is supplied, keep requirements whose window overlaps it.
+        // Rows missing both dates are always kept (can't be excluded reliably).
+        if (rangeStartMs == null || rangeEndMs == null) return true;
+        if (!s.start && !s.end) return true;
+        const st = s.start ? s.start.getTime() : -Infinity;
+        const en = s.end ? s.end.getTime() : Infinity;
+        return st <= rangeEndMs && en >= rangeStartMs;
+      });
+  }, [rows, rangeStartMs, rangeEndMs]);
 
   const filtered = useMemo(() => {
     const arr = summaries.filter((s) => {

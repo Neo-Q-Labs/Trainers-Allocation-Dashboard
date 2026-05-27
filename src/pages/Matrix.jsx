@@ -1,43 +1,35 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, memo } from 'react';
 import { useGetTrainersQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
-import DatePicker from '../components/DatePicker.jsx';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
 /* ============================================================
-   Trainer Matrix
+   Trainer Matrix · Engagement Grid
    ------------------------------------------------------------
-   Live matrix of every trainer × the next 30 days, sourced
-   from Trainer Data Live (via /api/v1/trainers). A dropdown
-   switches between the Internal pool (FT + SME + WILP) and
-   the Freelancer pool. Each cell colour-codes the trainer's
-   allotment for that date.
+   Live allocation heatmap (trainer × day) sourced from Trainer
+   Data Live (/api/v1/trainers). Each cell is reduced to one of
+   exactly FOUR meaningful states for easy visual scanning:
+
+     • Fully Occupied     — primary trainer on a delivery
+     • Partially Occupied — TA / backup / supporting role
+     • Holiday            — weekend (or no work scheduled)
+     • Leave              — exit / on-leave
+
+   (A free weekday shows as an empty base cell.)
+   Track + Client chips and a search/status filter narrow the
+   grid; a Trainer Directory snapshot summarises each trainer.
    ============================================================ */
 
 const INTERNAL_TYPES = new Set(['FT', 'SME', 'WILP']);
 
-// Pagination — chosen as a balance between scannable matrix density and
-// scroll-fatigue. 25 keeps the grid roughly one viewport tall on 1440p.
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 25;
+const WINDOW_DAYS = 28;
 
-const POOLS = [
-  { id: 'internal',   label: 'Internal',   sub: 'FT · SME · WILP' },
-  { id: 'freelancer', label: 'Freelancer', sub: 'External pool'  },
-];
-
-const TYPE_DOT = {
-  FT:         'var(--neon-red)',
-  SME:        'var(--neon-purple)',
-  WILP:       'var(--wilp)',
-  FREELANCER: 'var(--neon-yellow)',
-};
-
-const TYPE_LABEL = {
-  FT:         'Internal-Fulltime',
-  SME:        'Internal-SME',
-  WILP:       'Internal-WILP',
-  FREELANCER: 'Freelancer',
-};
+const STOPWORDS = new Set([
+  'the','and','for','of','to','with','in','on','by','trainer','trainers',
+  'ta','tas','backup','training','course','program','phase','session','batch',
+  'sem','revision','not','alloted','allocated','na','no','class','tbd','hold',
+  'leave','exit','holiday','pending','new','old','using','based','live','demo',
+]);
 
 const toIso = (d) => {
   const y = d.getFullYear();
@@ -47,465 +39,540 @@ const toIso = (d) => {
 };
 
 const initials = (name) => (name || '?')
-  .split(/\s+/)
-  .filter(Boolean)
-  .slice(0, 2)
-  .map((w) => w[0].toUpperCase())
-  .join('');
+  .split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
-// Classify a Trainer Data Live cell into a coarse status used for colouring.
+// free / exit / leave / ta / backup / trainer
+// NOTE: "Exit" (off-boarded) is distinct from "Leave" / "On Leave" (temporary).
 const classifyCell = (cell) => {
   const s = (cell || '').trim().toLowerCase();
   if (!s || s === 'not alloted' || s === 'not allocated' || s === 'na' || s === 'n/a') return 'free';
-  if (s === 'exit' || s === 'exited' || s === 'left' || s === 'leave' || s === 'on leave') return 'leave';
+  if (s === 'exit' || s === 'exited' || s === 'left' || s === 'resigned') return 'exit';
+  if (s === 'leave' || s === 'on leave' || s === 'on-leave' || s === 'onleave') return 'leave';
   if (s.endsWith('-ta') || s.endsWith(' ta') || s.includes(' ta ') || s.includes('internal ta')) return 'ta';
   if (s.includes('backup') || s.includes('back up') || s.includes('back-up')) return 'backup';
   return 'trainer';
 };
 
-// Parse the cell into a "Client / Course" pair for the tooltip.
-const parseAssignment = (cell) => {
-  const raw = (cell || '').trim();
-  if (!raw) return { client: '', course: '', role: '' };
-  const lower = raw.toLowerCase();
-  let role = 'Trainer';
-  let body = raw;
-  for (const suffix of ['-trainer', '-trainers', '-ta', '-backup', '_trainer']) {
-    if (lower.endsWith(suffix)) {
-      body = raw.slice(0, -suffix.length);
-      role = suffix.includes('ta') ? 'TA' : (suffix.includes('backup') ? 'Backup' : 'Trainer');
-      break;
-    }
-  }
-  const parts = body.split('-').map((p) => p.trim()).filter(Boolean);
-  if (parts.length === 0) return { client: raw, course: '', role };
-  if (parts.length === 1) return { client: '', course: parts[0], role };
-  return { client: parts[0], course: parts.slice(1).join(' · '), role };
+// Sunday is the weekly week-off → treated as Holiday.
+const isWeekOff = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay() === 0; // 0 = Sunday
 };
 
-export default function Matrix({ active }) {
-  const [pool, setPool] = useState('internal');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // all | free | occupied
-  const [poolMenuOpen, setPoolMenuOpen] = useState(false);
+// "No Class" / "Holiday" cells are explicit non-teaching days → Holiday.
+const isNoClass = (cell) => {
+  const s = (cell || '').trim().toLowerCase();
+  return s.includes('no class') || s.includes('noclass') || s.includes('no-class') || s.includes('holiday');
+};
 
-  // Pagination state. We track the page (1-indexed for display) and the
-  // page-size. The page gets clamped via useEffect whenever the underlying
-  // filtered list shrinks so we never render an empty page.
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+// Reduce a (cell, date) to one of: full | partial | holiday | leave | exit | free
+const cellState = (cell, iso) => {
+  if (isNoClass(cell)) return 'holiday';          // "No Class" → Holiday
+  const kind = classifyCell(cell);
+  if (kind === 'exit') return 'exit';             // off-boarded
+  if (kind === 'leave') return 'leave';           // temporary leave
+  if (kind === 'trainer') return 'full';
+  if (kind === 'ta' || kind === 'backup') return 'partial';
+  // free → Sunday week-off becomes holiday, otherwise empty
+  return isWeekOff(iso) ? 'holiday' : 'free';
+};
+
+const STATE_LABEL = {
+  full:    'Fully Occupied',
+  partial: 'Partially Occupied',
+  holiday: 'Holiday',
+  leave:   'Leave',
+  free:    'Free',
+};
+
+// Parse "LTIM-MERN-Trainer" → { client: 'LTIM', course: 'MERN' }
+const parseAssignment = (cell) => {
+  const raw = (cell || '').trim();
+  if (!raw) return { client: '', course: '' };
+  let body = raw;
+  const lower = raw.toLowerCase();
+  for (const suffix of ['-trainer', '-trainers', '-ta', '-backup', '_trainer']) {
+    if (lower.endsWith(suffix)) { body = raw.slice(0, -suffix.length); break; }
+  }
+  const parts = body.split('-').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return { client: '', course: '' };
+  if (parts.length === 1) return { client: '', course: parts[0] };
+  return { client: parts[0], course: parts.slice(1).join(' ') };
+};
+
+const tokens = (text) => {
+  if (!text) return [];
+  return text.toLowerCase().replace(/[^\w\s]+/g, ' ').split(/\s+/)
+    .filter((t) => t && t.length >= 2 && !STOPWORDS.has(t));
+};
+
+// ---- Curated TRACK taxonomy ----
+// Raw course text in the sheet is messy ("MERN Batch 1", "No Class", "Java
+// FS-Trainer"). We map it to a small set of clean, canonical tracks via
+// keyword patterns so the filter chips read sensibly.
+const TRACK_PATTERNS = [
+  ['DSA',          /\b(dsa|data\s*struct|algorithm|problem\s*solving)\b/i],
+  ['Java FS',      /\b(java\s*fs|java\s*full|jfs|mern|mean|spring\s*boot|j2ee)\b/i],
+  ['.NET / Cloud', /(\.net|dotnet|\bnet\b|azure|\baws\b|\bgcp\b|cloud|devops|kubernetes)/i],
+  ['Python / ML',  /\b(python|machine\s*learning|\bml\b|data\s*sci|gen\s*ai|genai|\bai\b|\bnlp\b)\b/i],
+  ['Aptitude',     /\b(aptitude|quant|reasoning|verbal|soft\s*skill)\b/i],
+  ['SAP',          /\b(sap|abap|hana|fico|s\/4)\b/i],
+  ['Cyber / QA',   /\b(cyber|security|infosec|ethical|sdet|testing|\bqa\b|selenium)\b/i],
+  ['Web / React',  /\b(react|angular|frontend|front\s*end|javascript|node|vue|html|css)\b/i],
+  ['SQL / DB',     /\b(sql|database|mysql|oracle|plsql|mongo|postgres)\b/i],
+  ['C / C++',      /\b(c\+\+|cpp|\bc\b\s*programming|c\s*language)\b/i],
+];
+
+const deriveTracks = (text) => {
+  const out = [];
+  if (!text) return out;
+  for (const [name, re] of TRACK_PATTERNS) if (re.test(text)) out.push(name);
+  return out;
+};
+
+// ---- Clean client code from a cell prefix ----
+// Keep only short, code-like prefixes (e.g. "LTIM", "Parul", "SKG"); drop
+// noisy descriptive prefixes ("Exam Reporting: VIT", phrases with spaces /
+// colons / brackets) that aren't real clients.
+const cleanClient = (raw) => {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  if (/[:[\]()]/.test(s)) return '';        // descriptive text, not a code
+  if (/\s/.test(s)) return '';              // multi-word → not a client code
+  if (s.length < 2 || s.length > 14) return '';
+  if (!/[a-zA-Z]/.test(s)) return '';       // must contain letters
+  return s;
+};
+
+const TYPE_LABEL = {
+  FT: 'Internal · Fulltime', SME: 'Internal · SME', WILP: 'Internal · WILP', FREELANCER: 'Freelancer', EXIT: 'Exited',
+};
+
+// Pool dropdown options (active resources only — Exit lives in its own tab).
+const POOLS = [
+  { id: 'all',        label: 'All Pools',  sub: 'Active resources' },
+  { id: 'internal',   label: 'Internal',   sub: 'FT · SME · WILP' },
+  { id: 'freelancer', label: 'Freelancer', sub: 'External pool' },
+];
+
+// Status tabs. ALL / FREE / OCCUPIED / LEAVE operate on ACTIVE trainers
+// (Exit trainers are hidden). The dedicated EXIT tab reveals off-boarded
+// resources only.
+const STATUS_FILTERS = [
+  { id: 'all',      label: 'ALL' },
+  { id: 'free',     label: 'FREE' },
+  { id: 'occupied', label: 'OCCUPIED' },
+  { id: 'leave',    label: 'LEAVE' },
+  { id: 'exit',     label: 'EXIT' },
+];
+
+export default function Matrix({ active }) {
+  const { data, error, isLoading, refetch } = useGetTrainersQuery({ limit: 500 });
+
+  const [search, setSearch]           = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [trackFilter, setTrackFilter]   = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+  const [poolFilter, setPoolFilter]     = useState('all');
+  const [poolOpen, setPoolOpen]         = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => toIso(today), [today]);
 
-  // ----- Date-range filter (top-centre of the page) ------------------------
-  // Pending = what's in the date pickers right now. Committed = the range the
-  // matrix is currently rendering. Apply button copies pending → committed
-  // (also handled by clicking the picker date directly, see below).
+  // ----- Date-range filter (Start / End + Apply / Reset) -----
   const defaultStart = useMemo(() => toIso(today), [today]);
   const defaultEnd   = useMemo(
-    () => toIso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 29)),
+    () => toIso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + (WINDOW_DAYS - 1))),
     [today],
   );
-  const [pendingStart, setPendingStart] = useState(defaultStart);
-  const [pendingEnd,   setPendingEnd]   = useState(defaultEnd);
-  const [committedStart, setCommittedStart] = useState(defaultStart);
-  const [committedEnd,   setCommittedEnd]   = useState(defaultEnd);
+  const [rangeStart, setRangeStart] = useState(defaultStart);
+  const [rangeEnd,   setRangeEnd]   = useState(defaultEnd);
 
+  // Build the day columns from the committed range (capped at 92 for perf).
   const days = useMemo(() => {
-    const arr = [];
-    const [sy, sm, sd] = committedStart.split('-').map(Number);
-    const [ey, em, ed] = committedEnd.split('-').map(Number);
+    const [sy, sm, sd] = rangeStart.split('-').map(Number);
+    const [ey, em, ed] = rangeEnd.split('-').map(Number);
     const start = new Date(sy, sm - 1, sd);
     const end   = new Date(ey, em - 1, ed);
+    const arr = [];
     if (end < start) return arr;
     const cursor = new Date(start);
-    while (cursor <= end) {
-      arr.push({ iso: toIso(cursor), date: new Date(cursor) });
+    while (cursor <= end && arr.length < 92) {
+      arr.push({
+        iso: toIso(cursor),
+        weekday: cursor.toLocaleDateString('en-GB', { weekday: 'short' })[0],
+        day: cursor.getDate(),
+        weekend: cursor.getDay() === 0, // Sunday week-off
+      });
       cursor.setDate(cursor.getDate() + 1);
-      if (arr.length > 366) break; // safety cap
     }
     return arr;
-  }, [committedStart, committedEnd]);
-
-  const rangeInvalid = pendingEnd < pendingStart;
-  const rangeDirty = pendingStart !== committedStart || pendingEnd !== committedEnd;
-  const isDefault = committedStart === defaultStart && committedEnd === defaultEnd;
-  const rangeDays = days.length;
-
-  const applyRange = () => {
-    if (rangeInvalid) return;
-    setCommittedStart(pendingStart);
-    setCommittedEnd(pendingEnd);
-  };
-  const resetRange = () => {
-    setPendingStart(defaultStart);
-    setPendingEnd(defaultEnd);
-    setCommittedStart(defaultStart);
-    setCommittedEnd(defaultEnd);
-  };
-
-  const { data, error, isLoading, refetch } = useGetTrainersQuery({ limit: 500 });
+  }, [rangeStart, rangeEnd]);
+  const windowIsos = useMemo(() => days.map((d) => d.iso), [days]);
+  const workingDays = useMemo(() => days.filter((d) => !d.weekend).length || 1, [days]);
 
   const trainers = data?.trainers || [];
 
-  // Filter by selected pool, optional name/id search, and current-status filter.
-  const poolFiltered = useMemo(() => {
-    return trainers.filter((t) => {
-      const isInternal = INTERNAL_TYPES.has(t.type);
-      const isFreelancer = t.type === 'FREELANCER';
-      if (pool === 'internal' && !isInternal) return false;
-      if (pool === 'freelancer' && !isFreelancer) return false;
-      return true;
-    });
-  }, [trainers, pool]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return poolFiltered
-      .filter((t) => {
-        if (!q) return true;
-        return (
-          (t.name || '').toLowerCase().includes(q) ||
-          (t.employee_id || '').toLowerCase().includes(q) ||
-          (t.email || '').toLowerCase().includes(q) ||
-          (t.type_raw || '').toLowerCase().includes(q)
-        );
-      })
-      .filter((t) => {
-        if (statusFilter === 'all') return true;
-        const cell = (t.schedule || {})[todayIso] || '';
-        const kind = classifyCell(cell);
-        if (statusFilter === 'free') return kind === 'free';
-        if (statusFilter === 'occupied') return kind !== 'free' && kind !== 'leave';
-        return true;
-      })
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [poolFiltered, search, statusFilter, todayIso]);
-
-  // Aggregate counts for the header
-  const poolCounts = useMemo(() => {
-    const internal = trainers.filter((t) => INTERNAL_TYPES.has(t.type)).length;
-    const freelancer = trainers.filter((t) => t.type === 'FREELANCER').length;
-    return { internal, freelancer };
+  // ---- Heavy derivation #1: track + client vocab from each trainer's FULL
+  // history. This is the expensive part (regex over every schedule cell), so
+  // it depends only on `trainers` and is computed once — NOT re-run when the
+  // date range / window changes. ----
+  const trackClient = useMemo(() => {
+    const map = new Map();
+    for (const t of trainers) {
+      const sched = t.schedule || {};
+      const trackToks = new Set();
+      const clientSet = new Set();
+      for (const cell of Object.values(sched)) {
+        if (isNoClass(cell)) continue;
+        const k = classifyCell(cell);
+        if (k === 'free' || k === 'leave' || k === 'exit') continue;
+        const { client, course } = parseAssignment(cell);
+        for (const tr of deriveTracks(`${course} ${cell}`)) trackToks.add(tr);
+        const cl = cleanClient(client);
+        if (cl) clientSet.add(cl);
+      }
+      map.set(t, { trackToks, clientSet });
+    }
+    return map;
   }, [trainers]);
 
-  // ----- Pagination derivations ---------------------------------------------
-  const totalRows  = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  // Clamp page to [1, totalPages] (handles filter narrowing or page-size change)
-  const safePage = Math.min(Math.max(1, page), totalPages);
-  const startIdx = totalRows === 0 ? 0 : (safePage - 1) * pageSize;
-  const endIdx   = Math.min(startIdx + pageSize, totalRows);
-  const paged    = useMemo(() => filtered.slice(startIdx, endIdx), [filtered, startIdx, endIdx]);
+  // ---- Derivation #2: per-window stats + today's status. Lightweight loop
+  // over just the window dates; re-runs when the range changes. ----
+  const enriched = useMemo(() => {
+    return trainers.map((t) => {
+      const sched = t.schedule || {};
+      let full = 0, partial = 0, leave = 0, exitW = 0, freeWork = 0;
+      for (const iso of windowIsos) {
+        const st = cellState(sched[iso] || '', iso);
+        if (st === 'full') full += 1;
+        else if (st === 'partial') partial += 1;
+        else if (st === 'leave') leave += 1;
+        else if (st === 'exit') exitW += 1;
+        else if (st === 'free') freeWork += 1;
+      }
+      const allocated = full + partial;
+      const load = Math.round((allocated / workingDays) * 100);
+      const todayState = cellState(sched[todayIso] || '', todayIso);
+      let status;
+      if (todayState === 'exit') status = 'exit';
+      else if (todayState === 'leave') status = 'leave';
+      else if (todayState === 'full' || todayState === 'partial') status = 'occupied';
+      else status = 'free';
+      const tc = trackClient.get(t) || { trackToks: new Set(), clientSet: new Set() };
+      // Exit = off-boarded type, OR the resource is exit-dominated in the
+      // window with no active teaching (their cells read "Exit", not "Leave").
+      const isExit = t.type === 'EXIT' || (exitW > 0 && allocated === 0);
+      const pool = isExit ? 'exit' : (INTERNAL_TYPES.has(t.type) ? 'internal' : 'freelancer');
+      return {
+        ref: t,
+        name: t.name,
+        employee_id: t.employee_id,
+        type: t.type,
+        isInternal: pool === 'internal',
+        pool,
+        trackToks: tc.trackToks,
+        clientSet: tc.clientSet,
+        stats: { avail: freeWork, allocated, leave, load },
+        status,
+      };
+    });
+  }, [trainers, windowIsos, workingDays, todayIso, trackClient]);
 
-  // Snap back to page 1 whenever a filter changes — otherwise narrowing the
-  // pool while on page 8 would land on an empty page until clamped.
-  useEffect(() => { setPage(1); }, [pool, search, statusFilter, committedStart, committedEnd, pageSize]);
+  // Scope rows by the active EXIT tab + pool dropdown:
+  //  • EXIT tab  → only off-boarded (pool === 'exit'), ignoring the pool drop.
+  //  • otherwise → active resources only (exit hidden), within the pool drop.
+  const poolScoped = useMemo(() => {
+    if (statusFilter === 'exit') return enriched.filter((e) => e.pool === 'exit');
+    return enriched.filter((e) => e.pool !== 'exit' && (poolFilter === 'all' || e.pool === poolFilter));
+  }, [enriched, poolFilter, statusFilter]);
 
-  // If state drifted past the new end (e.g. sheet sync removed rows), pull it back.
+  // Track + Client chip vocabularies (top by frequency, within the pool).
+  const { trackChips, clientChips } = useMemo(() => {
+    const tCount = new Map(), cCount = new Map();
+    for (const e of poolScoped) {
+      for (const tok of e.trackToks) tCount.set(tok, (tCount.get(tok) || 0) + 1);
+      for (const cl of e.clientSet) cCount.set(cl, (cCount.get(cl) || 0) + 1);
+    }
+    const top = (m, n) => Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => k);
+    return { trackChips: top(tCount, 10), clientChips: top(cCount, 8) };
+  }, [poolScoped]);
+
+  const poolCounts = useMemo(() => ({
+    all: enriched.length,
+    internal: enriched.filter((e) => e.pool === 'internal').length,
+    freelancer: enriched.filter((e) => e.pool === 'freelancer').length,
+    exit: enriched.filter((e) => e.pool === 'exit').length,
+  }), [enriched]);
+
+  // Apply search / track / client + the today-status sub-filter.
+  // (FREE / OCCUPIED / LEAVE filter active rows by TODAY's live cell state;
+  //  ALL and EXIT don't apply a per-day status filter.)
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const todayStatus = (statusFilter === 'free' || statusFilter === 'occupied' || statusFilter === 'leave')
+      ? statusFilter : null;
+    return poolScoped.filter((e) => {
+      if (todayStatus && e.status !== todayStatus) return false;
+      if (q) {
+        const hay = `${e.name} ${e.employee_id} ${Array.from(e.trackToks).join(' ')}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (trackFilter && !e.trackToks.has(trackFilter)) return false;
+      if (clientFilter && !e.clientSet.has(clientFilter)) return false;
+      return true;
+    });
+  }, [poolScoped, search, trackFilter, clientFilter, statusFilter]);
+
+  // Sort: occupied/leave first (most informative), then name.
+  const gridRows = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const rank = (s) => (s === 'occupied' ? 0 : s === 'leave' ? 1 : 2);
+      return rank(a.status) - rank(b.status) || a.name.localeCompare(b.name);
+    });
+  }, [filtered]);
+
+  const totals = useMemo(() => ({
+    total: enriched.length,
+    internal: enriched.filter((e) => e.pool === 'internal').length,
+    freelancer: enriched.filter((e) => e.pool === 'freelancer').length,
+    exit: enriched.filter((e) => e.pool === 'exit').length,
+  }), [enriched]);
+
+  // Switching pool clears the track/client chips (their vocab changes).
+  const pickPool = (id) => {
+    setPoolFilter(id);
+    setTrackFilter('');
+    setClientFilter('');
+    setPoolOpen(false);
+  };
+
+  // Close the pool dropdown on outside click / Escape.
+  const poolRef = useRef(null);
   useEffect(() => {
-    if (page !== safePage) setPage(safePage);
-  }, [page, safePage]);
+    if (!poolOpen) return;
+    const onDown = (e) => { if (poolRef.current && !poolRef.current.contains(e.target)) setPoolOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setPoolOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [poolOpen]);
 
-  if (error) return <ErrorPanel panelId="matrix" active={active} error={error?.error || error?.message || 'Failed to load trainers.'} onRetry={() => refetch()} />;
+  const activePool = POOLS.find((p) => p.id === poolFilter) || POOLS[0];
+
+  if (error) {
+    return <ErrorPanel panelId="matrix" active={active}
+      error={error?.error || error?.message || 'Failed to load trainers.'} onRetry={() => refetch()} />;
+  }
   if (isLoading && !data) return <LoadingPanel panelId="matrix" active={active} />;
-
-  const activePoolMeta = POOLS.find((p) => p.id === pool);
 
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel="matrix">
-      {/* Centered date-range filter — drives the matrix columns */}
-      <div className="mtx-filter-wrap">
-        <div className="mtx-filter">
-          <span className="mtx-filter-title">Date range</span>
-          <div className="mtx-filter-field">
-            <span className="mtx-filter-label">START</span>
-            <DatePicker value={pendingStart} onChange={setPendingStart} ariaLabel="Start date" />
-          </div>
-          <span className="mtx-filter-arrow" aria-hidden="true">→</span>
-          <div className="mtx-filter-field">
-            <span className="mtx-filter-label">END</span>
-            <DatePicker value={pendingEnd} onChange={setPendingEnd} ariaLabel="End date" />
-          </div>
-          <div className="mtx-filter-meta">
-            {rangeInvalid ? (
-              <span className="mtx-filter-err">End must be ≥ Start</span>
-            ) : (
-              <>
-                <span className="mtx-filter-window">{rangeDays}d</span>
-                {isDefault && <span className="mtx-filter-tag">Default · 30d</span>}
-              </>
-            )}
-          </div>
-          <div className="mtx-filter-actions">
-            <button
-              type="button"
-              className="mtx-filter-reset"
-              onClick={resetRange}
-              disabled={isDefault && !rangeDirty}
-              title="Reset to default 30-day window"
-            >
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
-              Reset
-            </button>
-            <button
-              type="button"
-              className="mtx-filter-apply"
-              onClick={applyRange}
-              disabled={rangeInvalid || !rangeDirty}
-            >
-              Apply
-            </button>
-          </div>
-        </div>
+      {/* Date-range filter */}
+      <div className="mx-toolbar">
+        <DateRangeFilter
+          start={rangeStart} end={rangeEnd}
+          defaultStart={defaultStart} defaultEnd={defaultEnd}
+          onApply={(s, e) => { setRangeStart(s); setRangeEnd(e); }}
+        />
       </div>
 
-      <div className="card">
-        <div className="section-head">
+      {/* ===== Engagement grid card ===== */}
+      <div className="card mx-card">
+        <header className="mx-head">
           <div>
-            <div className="section-title">
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
+            <div className="mx-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
-              Trainer Matrix · Engagement Grid
+              TRAINER MATRIX · ENGAGEMENT GRID
             </div>
-            <div className="section-sub" style={{ marginTop: '6px' }}>
-              {filtered.length} trainer{filtered.length === 1 ? '' : 's'} · {rangeDays}-day allotment from Trainer Data Live · hover any cell for delivery + role
-            </div>
+            <div className="mx-sub">Live allocation per trainer × day · {days.length}-day window · hover any cell</div>
           </div>
-          <div className="section-actions">
-            {/* Pool dropdown */}
-            <div className={`mtx-pool${poolMenuOpen ? ' is-open' : ''}`}>
-              <button
-                type="button"
-                className="mtx-pool-trigger"
-                onClick={() => setPoolMenuOpen((v) => !v)}
-                onBlur={() => setTimeout(() => setPoolMenuOpen(false), 120)}
-              >
-                <span className="mtx-pool-pill">{pool === 'internal' ? poolCounts.internal : poolCounts.freelancer}</span>
-                <span className="mtx-pool-label">{activePoolMeta?.label}</span>
-                <span className="mtx-pool-sub">· {activePoolMeta?.sub}</span>
-                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mtx-pool-caret">
+          <div className="mx-head-right">
+            <div className="mx-search">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input placeholder="Search trainer or track…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              {search && <button className="mx-search-clear" onClick={() => setSearch('')} aria-label="Clear">×</button>}
+            </div>
+            <div className="mx-status-chips" role="tablist">
+              {STATUS_FILTERS.map((s) => (
+                <button key={s.id} type="button" role="tab" aria-selected={statusFilter === s.id}
+                  className={`mx-status-chip${statusFilter === s.id ? ' is-active' : ''}`}
+                  onClick={() => setStatusFilter(s.id)}>{s.label}</button>
+              ))}
+            </div>
+
+            {/* Pool dropdown — Internal / Freelancer / Exit (right corner) */}
+            <div ref={poolRef} className={`mx-pool${poolOpen ? ' is-open' : ''}`}>
+              <button type="button" className="mx-pool-trigger" onClick={() => setPoolOpen((v) => !v)}>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <span className="mx-pool-label">{activePool.label}</span>
+                <span className="mx-pool-count">{poolCounts[poolFilter]}</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mx-pool-caret">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
-              {poolMenuOpen && (
-                <div className="mtx-pool-menu">
+              {poolOpen && (
+                <div className="mx-pool-menu">
                   {POOLS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`mtx-pool-opt${pool === p.id ? ' is-active' : ''}`}
-                      onMouseDown={(e) => { e.preventDefault(); setPool(p.id); setPoolMenuOpen(false); }}
-                    >
-                      <span className="mtx-pool-pill">{p.id === 'internal' ? poolCounts.internal : poolCounts.freelancer}</span>
-                      <span className="mtx-pool-opt-text">
-                        <span className="mtx-pool-opt-label">{p.label}</span>
-                        <span className="mtx-pool-opt-sub">{p.sub}</span>
+                    <button key={p.id} type="button"
+                      className={`mx-pool-opt${poolFilter === p.id ? ' is-active' : ''}`}
+                      onClick={() => pickPool(p.id)}>
+                      <span className="mx-pool-opt-main">
+                        <span className="mx-pool-opt-label">{p.label}</span>
+                        <span className="mx-pool-opt-sub">{p.sub}</span>
                       </span>
+                      <span className="mx-pool-opt-count">{poolCounts[p.id]}</span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-
-            <div className="input-wrap" style={{ width: '220px' }}>
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input
-                className="input"
-                placeholder="Search trainer / ID / type…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="range-segment">
-              <button className={statusFilter === 'all' ? 'active' : ''} onClick={() => setStatusFilter('all')}>All</button>
-              <button className={statusFilter === 'free' ? 'active' : ''} onClick={() => setStatusFilter('free')}>Free today</button>
-              <button className={statusFilter === 'occupied' ? 'active' : ''} onClick={() => setStatusFilter('occupied')}>Occupied today</button>
-            </div>
           </div>
-        </div>
+        </header>
 
-        {/* Legend */}
-        <div className="mtx-legend">
-          <span className="mtx-legend-item"><span className="mtx-legend-swatch is-free" /> Free</span>
-          <span className="mtx-legend-item"><span className="mtx-legend-swatch is-trainer" /> Trainer</span>
-          <span className="mtx-legend-item"><span className="mtx-legend-swatch is-ta" /> TA</span>
-          <span className="mtx-legend-item"><span className="mtx-legend-swatch is-backup" /> Backup</span>
-          <span className="mtx-legend-item"><span className="mtx-legend-swatch is-leave" /> Leave / Exit</span>
-        </div>
+        {/* Track filter */}
+        <ChipRow label="TRACK" chips={trackChips} value={trackFilter} onChange={setTrackFilter} />
+        {/* Client filter */}
+        <ChipRow label="CLIENT" chips={clientChips} value={clientFilter} onChange={setClientFilter} />
 
-        {/* Matrix grid */}
-        <div className="mtx-wrap">
-          <div className="mtx-grid" style={{ gridTemplateColumns: `220px repeat(${days.length}, minmax(28px, 1fr))` }}>
-            {/* Day header row */}
-            <div className="mtx-corner">Trainer · Type</div>
-            {days.map((d) => {
-              const isToday = d.iso === todayIso;
-              const weekday = d.date.toLocaleDateString('en-GB', { weekday: 'short' })[0];
-              const dayNum = d.date.getDate();
-              return (
-                <div key={d.iso} className={`mtx-day-head${isToday ? ' is-today' : ''}`} title={d.iso}>
-                  <div className="mtx-day-wd">{weekday}</div>
-                  <div className="mtx-day-num">{dayNum}</div>
-                </div>
-              );
-            })}
+        {/* Grid */}
+        <div className="mx-grid-wrap">
+          <div className="mx-grid" style={{ gridTemplateColumns: `190px repeat(${days.length}, minmax(22px, 1fr))` }}>
+            <div className="mx-corner">Trainer</div>
+            {days.map((d) => (
+              <div key={d.iso} className={`mx-dhead${d.iso === todayIso ? ' is-today' : ''}${d.weekend ? ' is-weekend' : ''}`} title={d.iso}>
+                <span className="mx-dhead-wd">{d.weekday}</span>
+                <span className="mx-dhead-num">{d.day}</span>
+              </div>
+            ))}
 
-            {/* Trainer rows */}
-            {totalRows === 0 ? (
-              <div className="mtx-empty" style={{ gridColumn: `1 / span ${days.length + 1}` }}>
+            {gridRows.length === 0 ? (
+              <div className="mx-empty" style={{ gridColumn: `1 / span ${days.length + 1}` }}>
                 No trainers match the current filters.
               </div>
-            ) : (
-              paged.map((t) => {
-                const schedule = t.schedule || {};
-                return (
-                  <div key={`${t.employee_id || ''}-${t.name}`} style={{ display: 'contents' }}>
-                    <div className="mtx-row-head">
-                      <span className="mtx-avatar" style={{ background: TYPE_DOT[t.type] || 'var(--text-muted)' }}>
-                        {initials(t.name)}
-                      </span>
-                      <span className="mtx-row-meta">
-                        <span className="mtx-row-name" title={t.name}>{t.name}</span>
-                        <span className="mtx-row-sub">
-                          <span className="mtx-row-type" style={{ color: TYPE_DOT[t.type] || 'var(--text-muted)' }}>
-                            {TYPE_LABEL[t.type] || t.type_raw || 'Unclassified'}
-                          </span>
-                          {t.employee_id && (
-                            <>
-                              <span className="mtx-dot-sep">·</span>
-                              <span>{t.employee_id}</span>
-                            </>
-                          )}
-                        </span>
-                      </span>
-                    </div>
-                    {days.map((d) => {
-                      const cell = schedule[d.iso] || '';
-                      const kind = classifyCell(cell);
-                      const parsed = kind === 'trainer' || kind === 'ta' || kind === 'backup' ? parseAssignment(cell) : null;
-                      const tooltipBits = [d.iso];
-                      if (parsed) {
-                        if (parsed.client) tooltipBits.push(`Client: ${parsed.client}`);
-                        if (parsed.course) tooltipBits.push(`Course: ${parsed.course}`);
-                        if (parsed.role) tooltipBits.push(`Role: ${parsed.role}`);
-                      } else if (kind === 'free') {
-                        tooltipBits.push('Free');
-                      } else if (kind === 'leave') {
-                        tooltipBits.push('Exit / Leave');
-                      }
-                      const isToday = d.iso === todayIso;
-                      return (
-                        <div
-                          key={d.iso}
-                          className={`mtx-cell is-${kind}${isToday ? ' is-today' : ''}`}
-                          title={tooltipBits.join(' · ')}
-                        />
-                      );
-                    })}
-                  </div>
-                );
-              })
-            )}
+            ) : gridRows.map((e) => (
+              <MatrixRow key={`${e.employee_id || ''}-${e.name}`} e={e} days={days} todayIso={todayIso} />
+            ))}
           </div>
         </div>
 
-        {/* Pagination — keeps the matrix scannable when the filtered list is
-            long. Hidden when there are zero rows; controls auto-disable at
-            the boundaries. */}
-        {totalRows > 0 && (
-          <div className="mtx-pager" role="navigation" aria-label="Trainer matrix pagination">
-            <div className="mtx-pager-status">
-              Showing <strong>{startIdx + 1}</strong>–<strong>{endIdx}</strong> of <strong>{totalRows}</strong> trainer{totalRows === 1 ? '' : 's'}
-            </div>
+        {/* Legend — exactly 4 states + free base */}
+        <div className="mx-legend">
+          <span className="mx-leg"><span className="mx-leg-sw is-full" /> Fully Occupied</span>
+          <span className="mx-leg"><span className="mx-leg-sw is-partial" /> Partially Occupied</span>
+          <span className="mx-leg"><span className="mx-leg-sw is-holiday" /> Holiday</span>
+          <span className="mx-leg"><span className="mx-leg-sw is-leave" /> Leave</span>
+          <span className="mx-leg"><span className="mx-leg-sw is-free" /> Free</span>
+          <span className="mx-leg-count">
+            {gridRows.length} of {statusFilter === 'exit' ? totals.exit : (totals.total - totals.exit)} {statusFilter === 'exit' ? 'exited' : 'active'} trainers
+          </span>
+        </div>
+      </div>
 
-            <div className="mtx-pager-size">
-              <label htmlFor="mtx-page-size">Rows / page</label>
-              <select
-                id="mtx-page-size"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-              >
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="mtx-pager-nav">
-              <button
-                type="button"
-                className="mtx-pager-btn"
-                onClick={() => setPage(1)}
-                disabled={safePage <= 1}
-                aria-label="First page"
-                title="First page"
-              >
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="11 17 6 12 11 7" />
-                  <polyline points="18 17 13 12 18 7" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="mtx-pager-btn"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                aria-label="Previous page"
-                title="Previous page"
-              >
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-                Prev
-              </button>
-
-              <span className="mtx-pager-page">
-                Page <strong>{safePage}</strong> <span className="mtx-pager-of">of</span> <strong>{totalPages}</strong>
-              </span>
-
-              <button
-                type="button"
-                className="mtx-pager-btn"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                aria-label="Next page"
-                title="Next page"
-              >
-                Next
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="mtx-pager-btn"
-                onClick={() => setPage(totalPages)}
-                disabled={safePage >= totalPages}
-                aria-label="Last page"
-                title="Last page"
-              >
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="13 17 18 12 13 7" />
-                  <polyline points="6 17 11 12 6 7" />
-                </svg>
-              </button>
-            </div>
+      {/* ===== Trainer Directory snapshot ===== */}
+      <div className="card mx-dir">
+        <header className="mx-dir-head">
+          <div className="mx-title">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            TRAINER DIRECTORY · SNAPSHOT
           </div>
+          <div className="mx-dir-sub">
+            <strong>{totals.total}</strong> trainers monitored · <strong>{totals.internal}</strong> internal · <strong>{totals.freelancer}</strong> freelancer pool
+          </div>
+        </header>
+        <div className="mx-dir-grid">
+          {gridRows.slice(0, 24).map((e) => <DirectoryCard key={`d-${e.employee_id || ''}-${e.name}`} e={e} />)}
+        </div>
+        {gridRows.length > 24 && (
+          <div className="mx-dir-foot">Showing first <strong>24</strong> of <strong>{gridRows.length}</strong> matching trainers — refine filters to narrow.</div>
         )}
       </div>
     </section>
+  );
+}
+
+/* ----- one trainer row (memoised) -----
+   React.memo means filtering only mounts/unmounts rows; the cells of rows
+   that remain are NOT re-rendered, since `e`, `days` and `todayIso` keep
+   stable references across filter changes. This is the main perf win for
+   the 250-row × 50-col grid. */
+const MatrixRow = memo(function MatrixRow({ e, days, todayIso }) {
+  const sched = e.ref.schedule || {};
+  return (
+    <div style={{ display: 'contents' }}>
+      <div className="mx-rowhead" title={`${e.name} · ${TYPE_LABEL[e.type] || e.type}`}>
+        <span className="mx-rowhead-name">{e.name}</span>
+      </div>
+      {days.map((d) => {
+        const cell = sched[d.iso] || '';
+        const st = cellState(cell, d.iso);
+        const parsed = (st === 'full' || st === 'partial') ? parseAssignment(cell) : null;
+        const tip = parsed
+          ? `${e.name} · ${d.iso}\n${STATE_LABEL[st]} · ${parsed.client ? parsed.client + ' · ' : ''}${parsed.course || cell}`
+          : `${e.name} · ${d.iso}\n${STATE_LABEL[st]}${st === 'holiday' && cell.trim() ? ` · ${cell.trim()}` : ''}`;
+        return <div key={d.iso} className={`mx-cell is-${st}${d.iso === todayIso ? ' is-today' : ''}`} title={tip} />;
+      })}
+    </div>
+  );
+});
+
+/* ----- filter chip row ----- */
+function ChipRow({ label, chips, value, onChange }) {
+  return (
+    <div className="mx-chiprow">
+      <span className="mx-chiprow-label">{label}</span>
+      <button type="button" className={`mx-chip${!value ? ' is-active' : ''}`} onClick={() => onChange('')}>All</button>
+      {chips.map((c) => (
+        <button key={c} type="button" className={`mx-chip${value === c ? ' is-active' : ''}`}
+          onClick={() => onChange(value === c ? '' : c)} title={c}>
+          {c.length > 16 ? c.slice(0, 15) + '…' : c}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ----- directory card ----- */
+const STATUS_PILL = {
+  free:     { label: 'FREE TODAY',     tone: 'ok' },
+  occupied: { label: 'OCCUPIED TODAY', tone: 'busy' },
+  leave:    { label: 'ON LEAVE',       tone: 'leave' },
+  exit:     { label: 'EXITED',         tone: 'exit' },
+};
+function DirectoryCard({ e }) {
+  const pill = e.pool === 'exit' ? STATUS_PILL.exit : (STATUS_PILL[e.status] || STATUS_PILL.free);
+  const loadTone = e.stats.load >= 85 ? 'high' : e.stats.load >= 50 ? 'mid' : 'low';
+  const skill = Array.from(e.trackToks).slice(0, 2).join(' / ').toUpperCase() || '—';
+  return (
+    <div className={`mx-dcard mx-dcard-${pill.tone}`}>
+      <div className="mx-dcard-top">
+        <span className="mx-dcard-avatar">{initials(e.name)}</span>
+        <div className="mx-dcard-id">
+          <div className="mx-dcard-name" title={e.name}>{e.name}</div>
+          <div className="mx-dcard-meta">{e.employee_id || '—'} · {e.isInternal ? 'Internal' : 'Freelancer'} · {skill}</div>
+        </div>
+        <span className={`mx-dcard-pill mx-pill-${pill.tone}`}><span className="mx-pill-dot" />{pill.label}</span>
+      </div>
+      <div className={`mx-dcard-bar mx-dcard-bar-${loadTone}`}>
+        <span style={{ width: `${Math.min(100, e.stats.load)}%` }} />
+      </div>
+      <div className="mx-dcard-stats">
+        <div className="mx-stat"><span className="mx-stat-num is-ok">{e.stats.avail}</span><span className="mx-stat-lab">AVAIL DAYS</span></div>
+        <div className="mx-stat"><span className="mx-stat-num">{e.stats.allocated}</span><span className="mx-stat-lab">ALLOCATED</span></div>
+        <div className="mx-stat"><span className={`mx-stat-num${e.stats.leave > 0 ? ' is-leave' : ''}`}>{e.stats.leave}</span><span className="mx-stat-lab">LEAVE</span></div>
+        <div className="mx-stat"><span className={`mx-stat-num is-${loadTone}`}>{e.stats.load}%</span><span className="mx-stat-lab">LOAD</span></div>
+      </div>
+    </div>
   );
 }
