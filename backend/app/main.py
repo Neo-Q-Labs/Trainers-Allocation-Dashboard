@@ -28,12 +28,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Configure robust CORS middleware to allow cross-origin requests from Vercel and localhost
+cors_origins = [origin for origin in settings.cors_origins_list if origin != "*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=cors_origins,
+    allow_origin_regex="https://.*\\.vercel\\.app|https://.*\\.onrender\\.com|http://localhost:.*|http://127.0.0.1:.*",
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
 )
 
 # Public Auth Router
