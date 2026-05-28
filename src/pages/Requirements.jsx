@@ -52,7 +52,8 @@ function deriveType(row) {
   const fl = parseNum(row['Existing Freelancers']) + parseNum(row['New Freelancers Hired']) + parseNum(row['New Freelancer Required']);
   if (internal > 0 && fl > 0) return 'MIXED';
   if (fl > 0 && internal === 0) return 'FREELANCER';
-  return 'INTERNAL';
+  if (internal > 0) return 'INTERNAL';
+  return 'UNASSIGNED';                 // no allocation data yet
 }
 
 function deriveStatus(row) {
@@ -71,7 +72,7 @@ function summarise(row) {
   const fl = parseNum(row['Existing Freelancers']) + parseNum(row['New Freelancers Hired']);
   const filled = internal + fl;
   const gap = Math.max(0, required - filled);
-  return { trainerReq, taReq, required, filled, gap };
+  return { trainerReq, taReq, required, internal, fl_filled: fl, filled, gap };
 }
 
 function deriveRisk(row, gap) {
@@ -83,7 +84,7 @@ function deriveRisk(row, gap) {
 
 const riskTone = (risk) => (risk >= 10 ? 'high' : risk >= 4 ? 'med' : risk > 0 ? 'low' : 'none');
 const STATUS_TONE = { OPEN: 'open', CLOSED: 'closed', CANCELLED: 'cancelled' };
-const TYPE_TONE   = { INTERNAL: 'internal', FREELANCER: 'freelancer', MIXED: 'mixed' };
+const TYPE_TONE   = { INTERNAL: 'internal', FREELANCER: 'freelancer', MIXED: 'mixed', UNASSIGNED: 'unassigned' };
 
 function windowLabel(start, end) {
   if (start && end) return `${fmtShort(start)} → ${fmtShort(end)}`;
@@ -204,6 +205,8 @@ export default function Requirements({ active, onNewRequirement }) {
           ta_required: summary.taReq,
           trainer_required: summary.trainerReq,
           required: summary.required,
+          int_filled: summary.internal,
+          fl_filled: summary.fl_filled,
           gap: summary.gap,
           risk,
           archived,
@@ -508,7 +511,7 @@ function RequirementModal({ row, headers, onClose }) {
             <div className="oa-det-name">{row.course || row.client || 'Requirement Details'}</div>
             <div className="oa-det-sub">
               <span className={`oa-tbl-role oa-role-${row.status === 'OPEN' ? 'ta' : row.status === 'CLOSED' ? 'trainer' : 'bench'}`}>{row.status}</span>
-              <span className={`oa-tbl-pool ${row.type === 'INTERNAL' ? 'oa-pool-int' : 'oa-pool-frl'}`}>{row.type}</span>
+              <span className={`oa-tbl-pool ${row.type === 'INTERNAL' ? 'oa-pool-int' : row.type === 'FREELANCER' || row.type === 'MIXED' ? 'oa-pool-frl' : 'oa-pool-unassigned'}`}>{row.type}</span>
               <span className="oa-tbl-avail oa-avail-partial">{windowLabel(row.start, row.end)}</span>
             </div>
             {row.delivery_id && <div className="oa-det-id">Delivery ID: {row.delivery_id}</div>}
@@ -545,13 +548,14 @@ function RequirementsTable({ rows, totalRows, onRowClick }) {
       <table className="rq-table">
         <colgroup>
           <col style={{ width: '6px' }} />
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '24%' }} />
           <col style={{ width: '13%' }} />
-          <col style={{ width: '28%' }} />
-          <col style={{ width: '15%' }} />
-          <col style={{ width: '10%' }} />
           <col style={{ width: '9%' }} />
+          <col style={{ width: '11%' }} />
           <col style={{ width: '8%' }} />
-          <col style={{ width: '13%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '11%' }} />
         </colgroup>
         <thead>
           <tr>
@@ -560,6 +564,7 @@ function RequirementsTable({ rows, totalRows, onRowClick }) {
             <th>Course / Client</th>
             <th>Window</th>
             <th>Type</th>
+            <th className="rq-th-num">INT · FREE</th>
             <th className="rq-th-num">Trainers</th>
             <th className="rq-th-num">TAs</th>
             <th>Status</th>
@@ -589,7 +594,18 @@ function RequirementsRow({ row, onRowClick }) {
         {subtitle && <div className="rq-cc-sub" title={subtitle}>{subtitle}</div>}
       </td>
       <td className="rq-cell-when"><span className="rq-when">{windowLabel(row.start, row.end)}</span></td>
-      <td><span className={`rq-chip rq-chip-${TYPE_TONE[row.type] || 'internal'}`}>{row.type}</span></td>
+      <td><span className={`rq-chip rq-chip-${TYPE_TONE[row.type] || 'unassigned'}`}>{row.type}</span></td>
+      <td className="rq-cell-num">
+        {(row.int_filled > 0 || row.fl_filled > 0) ? (
+          <span className="rq-alloc">
+            <span className="rq-alloc-int">{row.int_filled}</span>
+            <span className="rq-alloc-sep">:</span>
+            <span className="rq-alloc-free">{row.fl_filled}</span>
+          </span>
+        ) : (
+          <span className="rq-num">—</span>
+        )}
+      </td>
       <td className="rq-cell-num"><span className="rq-num">{row.trainer_required > 0 ? row.trainer_required : '—'}</span></td>
       <td className="rq-cell-num"><span className="rq-num">{row.ta_required > 0 ? row.ta_required : '—'}</span></td>
       <td><span className={`rq-chip rq-chip-status-${STATUS_TONE[row.status]}`}><span className="rq-dot-mark" />{row.status}</span></td>

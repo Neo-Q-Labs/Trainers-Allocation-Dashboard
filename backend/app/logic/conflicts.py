@@ -9,6 +9,18 @@ def detect_conflicts(parsed: dict[str, Any]) -> dict[str, Any]:
     by_trainer_day: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     conflicts: list[dict[str, Any]] = []
 
+    # Build a delivery info lookup so each conflict leg can show course + dates
+    delivery_info: dict[str, dict[str, str]] = {}
+    for record in parsed["records"]:
+        did = record["delivery_id"]
+        if did not in delivery_info:
+            delivery_info[did] = {
+                "course_name": record.get("course_name") or did,
+                "campus":      record.get("campus") or "",
+                "start_date":  record.get("start_date_iso") or record.get("start_date") or "",
+                "end_date":    record.get("end_date_iso")   or record.get("end_date")   or "",
+            }
+
     for item in parsed["assignments"]:
         trainer = item.get("trainer")
         if trainer:
@@ -19,6 +31,18 @@ def detect_conflicts(parsed: dict[str, Any]) -> dict[str, Any]:
         if len(delivery_ids) > 1:
             trainer = items[0]["trainer"]
             campuses = sorted({item["campus"] for item in items if item.get("campus")})
+
+            legs = [
+                {
+                    "delivery_id": did,
+                    "course_name": delivery_info.get(did, {}).get("course_name", did),
+                    "campus":      delivery_info.get(did, {}).get("campus", ""),
+                    "start_date":  delivery_info.get(did, {}).get("start_date", ""),
+                    "end_date":    delivery_info.get(did, {}).get("end_date", ""),
+                }
+                for did in delivery_ids
+            ]
+
             conflicts.append(
                 {
                     "type": "double_booked",
@@ -27,6 +51,7 @@ def detect_conflicts(parsed: dict[str, Any]) -> dict[str, Any]:
                     "date": day,
                     "delivery_ids": delivery_ids,
                     "campuses": campuses,
+                    "legs": legs,
                     "message": f"{trainer} is assigned to {len(delivery_ids)} deliveries on {day}",
                 }
             )
@@ -59,7 +84,7 @@ def detect_conflicts(parsed: dict[str, Any]) -> dict[str, Any]:
     resolution_log: list[dict[str, Any]] = []
 
     return {
-        "conflicts": conflicts[:100],
+        "conflicts": conflicts[:200],
         "total_conflicts": total,
         "kpi_summary": kpi_summary,
         "conflict_prone_days": conflict_prone_days,

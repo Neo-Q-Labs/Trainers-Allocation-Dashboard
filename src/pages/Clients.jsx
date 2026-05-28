@@ -37,9 +37,13 @@ const STRINGS = {
   completed: 'Completed',
   noDeliveryData: 'No delivery data available.',
   
+  activeTrainers: 'Active Trainers',
+  internal: 'Internal',
+  freelancer: 'Freelancer',
+
   noTrainers: 'No trainers',
   unknown: 'Unknown',
-  
+
   internalTrainersLabel: 'Internal Trainers',
   freelancerTrainersLabel: 'Freelancer Trainers',
   noTrainersAssigned: 'No trainers assigned to this delivery yet.',
@@ -54,6 +58,27 @@ const STRINGS = {
   logicalClientsDesc: 'logical clients · click',
   drillIntoDesc: 'to drill into programmes & trainer details'
 };
+
+// ---- Per-client logo colours (matches Calendar.jsx CLIENT_META exactly) ----
+// Using inline styles avoids CSS-class gaps when cache hasn't refreshed yet.
+const CLIENT_COLOR_MAP = {
+  iamneo:   { bg: '#a855f7', text: '#fff' },
+  skg:      { bg: '#22d3a5', text: '#1B1F2C' },
+  lti:      { bg: '#06b6d4', text: '#fff' },
+  kct:      { bg: '#f5c542', text: '#1B1F2C' },
+  hexaware: { bg: '#fb923c', text: '#fff' },
+  parul:    { bg: '#818cf8', text: '#fff' },
+  stjoseph: { bg: '#f472b6', text: '#1B1F2C' },
+  vit:      { bg: '#34d399', text: '#1B1F2C' },
+  rec:      { bg: '#fbbf24', text: '#1B1F2C' },
+  bit:      { bg: '#60a5fa', text: '#fff' },
+  virtusa:  { bg: '#c084fc', text: '#1B1F2C' },
+  other:    { bg: '#64748B', text: '#fff' },
+};
+function clientLogoStyle(client) {
+  const entry = CLIENT_COLOR_MAP[client.client_key] || CLIENT_COLOR_MAP.other;
+  return { background: entry.bg, color: entry.text };
+}
 
 // ---- KPI strip SVG Icons ----------------------------------------------
 const ICON_CLIENTS = (
@@ -169,13 +194,12 @@ function deliveryStatusClass(d) {
 // ============================================================
 function ClientCard({ client, onView }) {
   const tone = client.risk === 'warn' ? 'warn' : 'ok';
-  const colorCls = `cl-color-${client.color || 'gray'}`;
 
   return (
     <div className={`client-card ${client.rank_class || ''}`}>
       <div className="cl-rank">#{client.rank}</div>
       <div className="cl-head">
-        <div className={`cl-logo ${colorCls}`}>{client.logo || client.logo_initials || '??'}</div>
+        <div className="cl-logo" style={clientLogoStyle(client)}>{client.logo || client.logo_initials || '??'}</div>
         <div>
           <div className="cl-name">{client.name}</div>
           <div className="cl-sub">{client.sub}</div>
@@ -246,7 +270,6 @@ function ClientCard({ client, onView }) {
 // ============================================================
 function ClientDrawer({ client, onClose }) {
   const [expandedDid, setExpandedDid] = useState(null);
-  const colorCls = `cl-color-${client.color || 'gray'}`;
 
   // Close on Escape
   useEffect(() => {
@@ -269,11 +292,12 @@ function ClientDrawer({ client, onClose }) {
       <aside className="cl-drawer">
         {/* ---- Header ---- */}
         <div className="cl-drawer-head">
-          <div className={`cl-drawer-logo ${colorCls}`}>{client.logo || client.logo_initials || '??'}</div>
+          <div className="cl-drawer-logo" style={clientLogoStyle(client)}>{client.logo || client.logo_initials || '??'}</div>
           <div className="cl-drawer-ident">
             <div className="cl-drawer-name">{client.name}</div>
             <div className="cl-drawer-sub">
-              {client.active_programmes} {STRINGS.active} · {client.total_programmes} {STRINGS.totalProgrammes}
+              {client.active_programmes ?? 0} {STRINGS.active}
+              {client.total_programmes != null && ` · ${client.total_programmes} ${STRINGS.totalProgrammes}`}
             </div>
           </div>
           <button type="button" className="cl-drawer-close" aria-label="Close" onClick={onClose}>
@@ -355,7 +379,11 @@ function ClientDrawer({ client, onClose }) {
         )}
 
         {(client.deliveries || []).length === 0 && (
-          <div className="cl-drawer-empty">{STRINGS.noDeliveryData}</div>
+          <div className="cl-drawer-empty">
+            {client.deliveries
+              ? STRINGS.noDeliveryData
+              : 'Programme details will appear after the next data sync.'}
+          </div>
         )}
       </aside>
     </>
