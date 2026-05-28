@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useDispatch } from 'react-redux';
+import { api } from './store/api.js';
 import Sidebar from './components/Sidebar.jsx';
 import Topbar from './components/Topbar.jsx';
 import StatusBar from './components/StatusBar.jsx';
@@ -21,6 +23,7 @@ import Login from './pages/Login.jsx';
 import { initApp } from './lib/setup.js';
 
 export default function App() {
+  const dispatch = useDispatch();
   const [token, setToken] = useState(localStorage.getItem('token') || '');
   const [user, setUser] = useState(null);
   const [activePanel, setActivePanel] = useState('overview');
@@ -47,6 +50,87 @@ export default function App() {
     window.addEventListener('auth-logout', handleLogout);
     return () => window.removeEventListener('auth-logout', handleLogout);
   }, []);
+
+  // Handle offline caching, status indicator, and automatic background reconnection polling
+  useEffect(() => {
+    let isOffline = false;
+    let pollInterval = null;
+    let offlineToastShown = false;
+    let onlineToastShown = false;
+
+    const handleOffline = () => {
+      if (!isOffline) {
+        isOffline = true;
+        if (!offlineToastShown && window.showToast) {
+          window.showToast(
+            'Offline Mode Active',
+            'Backend server is unreachable. Serving latest cached training data.',
+            'warn'
+          );
+          offlineToastShown = true;
+          onlineToastShown = false;
+        }
+
+        // Start background polling to check when backend comes back online
+        if (!pollInterval) {
+          pollInterval = setInterval(async () => {
+            try {
+              const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/health`);
+              if (res.ok) {
+                // Backend is back online!
+                clearInterval(pollInterval);
+                pollInterval = null;
+                isOffline = false;
+                offlineToastShown = false;
+                
+                if (!onlineToastShown && window.showToast) {
+                  window.showToast(
+                    'Online Sync Active',
+                    'Backend server connected! Refreshing allocations with fresh server data...',
+                    'ok'
+                  );
+                  onlineToastShown = true;
+                }
+
+                // Invalidate RTK Query cache to trigger auto-refetch across the dashboard
+                dispatch(api.util.invalidateTags(['sync']));
+              }
+            } catch (err) {
+              // Still offline, continue polling...
+            }
+          }, 8000); // Poll every 8 seconds
+        }
+      }
+    };
+
+    const handleOnline = () => {
+      if (isOffline) {
+        isOffline = false;
+        offlineToastShown = false;
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+        if (!onlineToastShown && window.showToast) {
+          window.showToast(
+            'Online Sync Active',
+            'Backend server connected! Refreshing allocations with fresh server data...',
+            'ok'
+          );
+          onlineToastShown = true;
+        }
+      }
+    };
+
+    window.addEventListener('backend-offline', handleOffline);
+    window.addEventListener('backend-online', handleOnline);
+
+    return () => {
+      window.removeEventListener('backend-offline', handleOffline);
+      window.removeEventListener('backend-online', handleOnline);
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [dispatch]);
 
   // Boot the runtime once after the DOM is mounted and user is authenticated.
   useEffect(() => {

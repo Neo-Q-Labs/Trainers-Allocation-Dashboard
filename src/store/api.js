@@ -40,12 +40,41 @@ const baseQuery = fetchBaseQuery({
 });
 
 const baseQueryWithReauth = async (args, api, extraOptions) => {
+  const isGet = !args.method || args.method.toUpperCase() === 'GET';
+  const urlPath = typeof args === 'string' ? args : args.url;
+  const cacheKey = isGet ? `offline_cache:${urlPath}:${JSON.stringify(typeof args === 'string' ? {} : args.params || {})}` : null;
+
   let result = await baseQuery(args, api, extraOptions);
-  if (result.error && result.error.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.dispatchEvent(new Event('auth-logout'));
+
+  if (result.error) {
+    if (result.error.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.dispatchEvent(new Event('auth-logout'));
+    } else if (isGet && (result.error.status === 'FETCH_ERROR' || typeof result.error.status !== 'number' || result.error.status >= 500)) {
+      // Backend is offline, unreachable, or crashed.
+      window.dispatchEvent(new CustomEvent('backend-offline', { detail: { url: urlPath } }));
+      
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          console.warn(`[Offline Cache] Backend unreachable. Serving cached data for: ${urlPath}`);
+          return { data: JSON.parse(cached) };
+        }
+      } catch (e) {
+        console.error('[Offline Cache] Failed to parse cached data', e);
+      }
+    }
+  } else if (isGet && result.data) {
+    // Successful GET query — update the offline cache and trigger online event
+    window.dispatchEvent(new CustomEvent('backend-online'));
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(result.data));
+    } catch (e) {
+      console.error('[Offline Cache] Failed to save to localStorage', e);
+    }
   }
+
   return result;
 };
 
