@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
-import { useGetClientsQuery } from '../store/api.js';
+import { useGetClientsQuery, useGetRequestTrackQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
+import RequirementModal from '../components/RequirementModal.jsx';
+import { buildRequirementRow, findRawByDeliveryId } from '../lib/req.js';
 
 /* ============================================================
    Clients page — logical client cards + drill-down drawer
@@ -268,8 +270,16 @@ function ClientCard({ client, onView }) {
 // ============================================================
 // ClientDrawer  — slide-in from right
 // ============================================================
-function ClientDrawer({ client, onClose }) {
+const DRAWER_PAGE_SIZE = 8;
+
+function ClientDrawer({ client, onClose, onPickProgramme }) {
   const [expandedDid, setExpandedDid] = useState(null);
+  const [activeQ, setActiveQ] = useState('');
+  const [completedQ, setCompletedQ] = useState('');
+  const [activePage, setActivePage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1);
+  useEffect(() => { setActivePage(1); }, [activeQ]);
+  useEffect(() => { setCompletedPage(1); }, [completedQ]);
 
   // Close on Escape
   useEffect(() => {
@@ -280,28 +290,49 @@ function ClientDrawer({ client, onClose }) {
 
   const toggle = (did) => setExpandedDid((prev) => (prev === did ? null : did));
 
-  const active = (client.deliveries || []).filter((d) => !d.is_completed);
-  const completed = (client.deliveries || []).filter((d) => d.is_completed);
-  const totalInt  = active.reduce((s, d) => s + (d.internal_count  || 0), 0);
-  const totalFree = active.reduce((s, d) => s + (d.freelancer_count || 0), 0);
+  const filterFn = (q) => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return () => true;
+    return (d) => {
+      const bag = [d.delivery_id, d.course, d.programme_name, d.track, d.subdomain].filter(Boolean).join(' ').toLowerCase();
+      return bag.includes(needle);
+    };
+  };
+
+  const allActive    = (client.deliveries || []).filter((d) => !d.is_completed);
+  const allCompleted = (client.deliveries || []).filter((d) =>  d.is_completed);
+  const active    = allActive.filter(filterFn(activeQ));
+  const completed = allCompleted.filter(filterFn(completedQ));
+  const activePageCount    = Math.max(1, Math.ceil(active.length    / DRAWER_PAGE_SIZE));
+  const completedPageCount = Math.max(1, Math.ceil(completed.length / DRAWER_PAGE_SIZE));
+  const activeSafePage     = Math.min(activePage,    activePageCount);
+  const completedSafePage  = Math.min(completedPage, completedPageCount);
+  const activeVisible    = active.slice((activeSafePage    - 1) * DRAWER_PAGE_SIZE, activeSafePage    * DRAWER_PAGE_SIZE);
+  const completedVisible = completed.slice((completedSafePage - 1) * DRAWER_PAGE_SIZE, completedSafePage * DRAWER_PAGE_SIZE);
+  const totalInt  = allActive.reduce((s, d) => s + (d.internal_count  || 0), 0);
+  const totalFree = allActive.reduce((s, d) => s + (d.freelancer_count || 0), 0);
   const denom     = Math.max(totalInt + totalFree, 1);
 
   return (
     <>
       <div className="cl-drawer-overlay" onClick={onClose} />
       <aside className="cl-drawer">
-        {/* ---- Header ---- */}
+        {/* ---- Header (compact, pipe-separated like Requirements) ---- */}
         <div className="cl-drawer-head">
           <div className="cl-drawer-logo" style={clientLogoStyle(client)}>{client.logo || client.logo_initials || '??'}</div>
           <div className="cl-drawer-ident">
-            <div className="cl-drawer-name">{client.name}</div>
-            <div className="cl-drawer-sub">
-              {client.active_programmes ?? 0} {STRINGS.active}
-              {client.total_programmes != null && ` · ${client.total_programmes} ${STRINGS.totalProgrammes}`}
+            <div className="cl-drawer-ident-row">
+              <span className="cl-drawer-name">{client.name}</span>
+              <span className="cl-drawer-sep">|</span>
+              <span className="cl-drawer-meta">{client.active_programmes ?? 0} {STRINGS.active}</span>
+              {client.total_programmes != null && <>
+                <span className="cl-drawer-sep">|</span>
+                <span className="cl-drawer-meta">{client.total_programmes} {STRINGS.totalProgrammes}</span>
+              </>}
             </div>
           </div>
           <button type="button" className="cl-drawer-close" aria-label="Close" onClick={onClose}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
@@ -339,42 +370,86 @@ function ClientDrawer({ client, onClose }) {
         )}
 
         {/* ---- Active programmes ---- */}
-        {active.length > 0 && (
+        {allActive.length > 0 && (
           <div className="cl-drawer-section">
-            <div className="cl-drawer-section-title">
-              {STRINGS.activeProgrammes}
-              <span className="cl-drawer-section-badge">{active.length}</span>
+            <div className="cl-drawer-section-head">
+              <div className="cl-drawer-section-title">
+                {STRINGS.activeProgrammes}
+                <span className="cl-drawer-section-badge">{active.length}/{allActive.length}</span>
+              </div>
+              <div className="cl-drawer-search">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input type="search" placeholder="Filter…" value={activeQ} onChange={(e) => setActiveQ(e.target.value)} />
+              </div>
             </div>
-            <ul className="cl-delivery-list">
-              {active.map((d) => (
-                <DeliveryRow
-                  key={d.delivery_id}
-                  delivery={d}
-                  expanded={expandedDid === d.delivery_id}
-                  onToggle={() => toggle(d.delivery_id)}
+            {active.length === 0 ? (
+              <div className="rqd-empty">No matches for that search.</div>
+            ) : (
+              <>
+                <ul className="cl-delivery-list">
+                  {activeVisible.map((d) => (
+                    <DeliveryRow
+                      key={d.delivery_id}
+                      delivery={d}
+                      expanded={expandedDid === d.delivery_id}
+                      onToggle={() => toggle(d.delivery_id)}
+                      onPick={() => onPickProgramme?.(d.delivery_id)}
+                    />
+                  ))}
+                </ul>
+                <DrawerPager
+                  page={activeSafePage}
+                  pageCount={activePageCount}
+                  total={active.length}
+                  pageSize={DRAWER_PAGE_SIZE}
+                  onChange={setActivePage}
                 />
-              ))}
-            </ul>
+              </>
+            )}
           </div>
         )}
 
         {/* ---- Completed programmes ---- */}
-        {completed.length > 0 && (
+        {allCompleted.length > 0 && (
           <div className="cl-drawer-section">
-            <div className="cl-drawer-section-title cl-drawer-section-title-muted">
-              {STRINGS.completed}
-              <span className="cl-drawer-section-badge">{completed.length}</span>
+            <div className="cl-drawer-section-head">
+              <div className="cl-drawer-section-title cl-drawer-section-title-muted">
+                {STRINGS.completed}
+                <span className="cl-drawer-section-badge">{completed.length}/{allCompleted.length}</span>
+              </div>
+              <div className="cl-drawer-search">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input type="search" placeholder="Filter…" value={completedQ} onChange={(e) => setCompletedQ(e.target.value)} />
+              </div>
             </div>
-            <ul className="cl-delivery-list cl-delivery-list-dim">
-              {completed.map((d) => (
-                <DeliveryRow
-                  key={d.delivery_id}
-                  delivery={d}
-                  expanded={expandedDid === d.delivery_id}
-                  onToggle={() => toggle(d.delivery_id)}
+            {completed.length === 0 ? (
+              <div className="rqd-empty">No matches for that search.</div>
+            ) : (
+              <>
+                <ul className="cl-delivery-list cl-delivery-list-dim">
+                  {completedVisible.map((d) => (
+                    <DeliveryRow
+                      key={d.delivery_id}
+                      delivery={d}
+                      expanded={expandedDid === d.delivery_id}
+                      onToggle={() => toggle(d.delivery_id)}
+                      onPick={() => onPickProgramme?.(d.delivery_id)}
+                    />
+                  ))}
+                </ul>
+                <DrawerPager
+                  page={completedSafePage}
+                  pageCount={completedPageCount}
+                  total={completed.length}
+                  pageSize={DRAWER_PAGE_SIZE}
+                  onChange={setCompletedPage}
                 />
-              ))}
-            </ul>
+              </>
+            )}
           </div>
         )}
 
@@ -391,15 +466,46 @@ function ClientDrawer({ client, onClose }) {
 }
 
 
+function DrawerPager({ page, pageCount, total, pageSize, onChange }) {
+  if (pageCount <= 1) return null;
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(total, page * pageSize);
+  return (
+    <div className="cl-drawer-pager">
+      <span className="cl-drawer-pager-info">
+        {start}–{end} of {total}
+      </span>
+      <div className="cl-drawer-pager-ctrls">
+        <button type="button" className="cl-drawer-pager-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>‹</button>
+        <span className="cl-drawer-pager-page">{page} / {pageCount}</span>
+        <button type="button" className="cl-drawer-pager-btn" disabled={page >= pageCount} onClick={() => onChange(page + 1)}>›</button>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
 // DeliveryRow  — one programme inside the drawer
 // ============================================================
-function DeliveryRow({ delivery: d, expanded, onToggle }) {
+function DeliveryRow({ delivery: d, expanded, onToggle, onPick }) {
   const stCls = deliveryStatusClass(d);
   const hasTrainers = d.internal_count > 0 || d.freelancer_count > 0;
 
   return (
     <li className={`cl-d-row${expanded ? ' is-expanded' : ''}`}>
+      {onPick && (
+        <button
+          type="button"
+          className="cl-d-open"
+          aria-label="Open programme detail"
+          title="Open programme detail"
+          onClick={(e) => { e.stopPropagation(); onPick(); }}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 17 17 7" /><path d="M7 7h10v10" />
+          </svg>
+        </button>
+      )}
       <button type="button" className="cl-d-row-btn" onClick={onToggle}>
         <div className="cl-d-row-left">
           <div className="cl-d-course">{d.course_name}</div>
@@ -480,7 +586,24 @@ function DeliveryRow({ delivery: d, expanded, onToggle }) {
 // ============================================================
 export default function Clients({ active }) {
   const { data, error, refetch } = useGetClientsQuery();
+  const { data: rtRes } = useGetRequestTrackQuery({ limit: 500 });
+  const rtRows = rtRes?.rows || [];
+  const rtHeaders = rtRes?.headers || [];
   const [selectedClient, setSelectedClient] = useState(null);
+  const [pickedReq, setPickedReq] = useState(null);
+
+  const openProgramme = (deliveryId) => {
+    if (!deliveryId) {
+      window.notify?.('Programme details unavailable', 'No Delivery ID is attached to this entry.', 'warn');
+      return;
+    }
+    const raw = findRawByDeliveryId(rtRows, deliveryId);
+    if (!raw) {
+      window.notify?.('Programme not found', `No request-track row matches "${deliveryId}".`, 'warn');
+      return;
+    }
+    setPickedReq(buildRequirementRow(raw));
+  };
 
   const kpis    = useMemo(() => (data?.kpis ? mapKpis(data.kpis) : null), [data]);
   const clients = useMemo(() => data?.clients ?? [], [data]);
@@ -556,6 +679,15 @@ export default function Clients({ active }) {
         <ClientDrawer
           client={selectedClient}
           onClose={() => setSelectedClient(null)}
+          onPickProgramme={openProgramme}
+        />
+      )}
+
+      {pickedReq && (
+        <RequirementModal
+          row={pickedReq}
+          headers={rtHeaders}
+          onClose={() => setPickedReq(null)}
         />
       )}
     </section>
