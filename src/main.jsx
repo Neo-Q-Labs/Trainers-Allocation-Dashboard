@@ -6,6 +6,11 @@ import { store } from './store/index.js';
 import { api } from './store/api.js';
 import './index.css';
 
+// Apply persisted theme as early as possible to avoid a dark-mode flash on login.
+if (localStorage.getItem('theme') === 'light') {
+  document.body.classList.add('light');
+}
+
 /* ----- Boot-time prefetch -----------------------------------------------
    Kick off every page's primary endpoint right after the store is created
    so by the time the user navigates anywhere the data is already in the
