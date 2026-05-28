@@ -1,9 +1,10 @@
-import { useState, useMemo, useRef, useEffect, memo } from 'react';
-import { useGetTrainersQuery } from '../store/api.js';
+import { useState, useMemo, useRef, useEffect, memo, useCallback } from 'react';
+import { useGetTrainersQuery, useGetRequestTrackQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
 import ExportButton from '../components/ExportButton.jsx';
-import SyncButton from '../components/SyncButton.jsx';
+import RequirementModal from '../components/RequirementModal.jsx';
+import { buildRequirementRow } from '../lib/req.js';
 import { exportToExcel } from '../lib/exportExcel.js';
 
 /* ============================================================
@@ -200,6 +201,9 @@ const DIR_PAGE_SIZE = 24;
 
 export default function Matrix({ active }) {
   const { data, error, isLoading, refetch } = useGetTrainersQuery({ limit: 500 });
+  const { data: rtRes } = useGetRequestTrackQuery({ limit: 500 });
+  const rtRows = rtRes?.rows || [];
+  const rtHeaders = rtRes?.headers || [];
 
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -209,6 +213,60 @@ export default function Matrix({ active }) {
   const [poolOpen, setPoolOpen]         = useState(false);
   const [dirPage, setDirPage]           = useState(0);        // 0-based page index for directory
   const [selectedTrainer, setSelectedTrainer] = useState(null); // trainer enriched obj for drawer
+  const [dayCell, setDayCell] = useState(null); // { iso, programmes: [{client, course, trainers, cell}] }
+  const [pickedReq, setPickedReq] = useState(null);
+
+  // Resolve a parsed cell ({client, course}) to a request-track raw row.
+  // Strict-first: exact Delivery-ID, then both client AND course substring
+  // match (with non-empty fields on both sides). Empty-field rows are
+  // never treated as matches — that was the bug behind the spurious
+  // "SKI-101 / unassigned / empty" results.
+  const resolveCellToRaw = useCallback((parsed) => {
+    if (!parsed) return null;
+    const client = String(parsed.client || '').trim().toLowerCase();
+    const course = String(parsed.course || '').trim().toLowerCase();
+    if (!client && !course) return null;
+
+    // 1. Exact Delivery-ID match against either token.
+    for (const r of rtRows) {
+      const rDel = String(r['Delivery ID'] || '').trim().toLowerCase();
+      if (!rDel) continue;
+      if (rDel === client || rDel === course) return r;
+    }
+
+    // 2. Strong dual-field match — BOTH client AND course must align,
+    //    and the candidate row's fields must be non-empty.
+    const containsBothWays = (haystack, needle) =>
+      haystack.includes(needle) || needle.includes(haystack);
+    for (const r of rtRows) {
+      const rClient = String(r['Client Name'] || '').trim().toLowerCase();
+      const rCourse = String(r['Course']      || '').trim().toLowerCase();
+      if (!rClient || !rCourse) continue;
+      const clientHit = client && containsBothWays(rClient, client);
+      const courseHit = course && containsBothWays(rCourse, course);
+      if (clientHit && courseHit) return r;
+    }
+
+    // 3. Last-resort: course-only strong match (when the cell has no client token).
+    if (!client && course) {
+      for (const r of rtRows) {
+        const rCourse = String(r['Course'] || '').trim().toLowerCase();
+        if (!rCourse) continue;
+        if (containsBothWays(rCourse, course)) return r;
+      }
+    }
+    return null;
+  }, [rtRows]);
+
+  const openProgrammeFromCell = useCallback((parsed) => {
+    const raw = resolveCellToRaw(parsed);
+    if (raw) {
+      setPickedReq(buildRequirementRow(raw));
+    } else {
+      const label = [parsed?.client, parsed?.course].filter(Boolean).join(' · ') || 'this assignment';
+      window.notify?.('Programme not found', `No request-track row matches ${label}.`, 'warn');
+    }
+  }, [resolveCellToRaw]);
 
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => toIso(today), [today]);
@@ -562,7 +620,6 @@ export default function Matrix({ active }) {
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <SyncButton />
               <ExportButton
                 onClick={handleExport}
                 disabled={!gridRows.length}
@@ -602,10 +659,35 @@ export default function Matrix({ active }) {
           <div className="mx-grid" style={{ gridTemplateColumns: `190px repeat(${days.length}, minmax(22px, 1fr))` }}>
             <div className="mx-corner">Trainer</div>
             {days.map((d) => (
-              <div key={d.iso} className={`mx-dhead${d.iso === todayIso ? ' is-today' : ''}${d.weekend ? ' is-weekend' : ''}`} title={d.iso}>
+              <button
+                key={d.iso}
+                type="button"
+                className={`mx-dhead is-clickable${d.iso === todayIso ? ' is-today' : ''}${d.weekend ? ' is-weekend' : ''}`}
+                title={`${d.iso} · click to list programmes`}
+                onClick={() => {
+                  const programmes = [];
+                  const seen = new Set();
+                  for (const row of gridRows) {
+                    const cell = (row.ref.schedule || {})[d.iso];
+                    if (!cell) continue;
+                    const st = cellState(cell, d.iso);
+                    if (st !== 'full' && st !== 'partial') continue;
+                    const parsed = parseAssignment(cell);
+                    const key = `${parsed.client}|${parsed.course}|${cell}`;
+                    if (seen.has(key)) {
+                      const entry = programmes.find((p) => p.key === key);
+                      if (entry) entry.trainers.push(row.name);
+                      continue;
+                    }
+                    seen.add(key);
+                    programmes.push({ key, ...parsed, cell, trainers: [row.name] });
+                  }
+                  setDayCell({ iso: d.iso, programmes });
+                }}
+              >
                 <span className="mx-dhead-wd">{d.weekday}</span>
                 <span className="mx-dhead-num">{d.day}</span>
-              </div>
+              </button>
             ))}
 
             {gridRows.length === 0 ? (
@@ -613,7 +695,33 @@ export default function Matrix({ active }) {
                 No trainers match the current filters.
               </div>
             ) : gridRows.map((e) => (
-              <MatrixRow key={`${e.employee_id || ''}-${e.name}`} e={e} days={days} todayIso={todayIso} />
+              <MatrixRow
+                key={`${e.employee_id || ''}-${e.name}`}
+                e={e}
+                days={days}
+                todayIso={todayIso}
+                onCellPick={({ iso, trainer }) => {
+                  // Reuse the day-cell modal but pre-filter to that trainer's row.
+                  const programmes = [];
+                  const seen = new Set();
+                  for (const row of gridRows) {
+                    const cell = (row.ref.schedule || {})[iso];
+                    if (!cell) continue;
+                    const st = cellState(cell, iso);
+                    if (st !== 'full' && st !== 'partial') continue;
+                    const parsed = parseAssignment(cell);
+                    const key = `${parsed.client}|${parsed.course}|${cell}`;
+                    if (seen.has(key)) {
+                      const entry = programmes.find((p) => p.key === key);
+                      if (entry) entry.trainers.push(row.name);
+                      continue;
+                    }
+                    seen.add(key);
+                    programmes.push({ key, ...parsed, cell, trainers: [row.name] });
+                  }
+                  setDayCell({ iso, programmes, presetSearch: trainer });
+                }}
+              />
             ))}
           </div>
         </div>
@@ -689,7 +797,113 @@ export default function Matrix({ active }) {
           onClose={() => setSelectedTrainer(null)}
         />
       )}
+
+      {dayCell && (
+        <DayCellModal
+          iso={dayCell.iso}
+          programmes={dayCell.programmes}
+          presetSearch={dayCell.presetSearch}
+          onPick={(parsed) => { setDayCell(null); openProgrammeFromCell(parsed); }}
+          onClose={() => setDayCell(null)}
+        />
+      )}
+
+      {pickedReq && (
+        <RequirementModal
+          row={pickedReq}
+          headers={rtHeaders}
+          onClose={() => setPickedReq(null)}
+        />
+      )}
     </section>
+  );
+}
+
+/* ----- Day cell modal — programmes running on the clicked column ----- */
+function DayCellModal({ iso, programmes, presetSearch = '', onPick, onClose }) {
+  const [q, setQ] = useState(presetSearch);
+  useEffect(() => { setQ(presetSearch); }, [presetSearch]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const needle = q.trim().toLowerCase();
+  const visible = programmes.filter((p) =>
+    !needle ||
+    [p.client, p.course, p.cell, p.trainers.join(' ')].some((v) => String(v || '').toLowerCase().includes(needle))
+  );
+  const niceDate = (() => {
+    try {
+      const [y, m, d] = iso.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    } catch { return iso; }
+  })();
+  return (
+    <div className="oa-det-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="oa-det-panel is-wide" role="dialog" aria-modal="true" aria-label={`Programmes on ${niceDate}`}>
+        <div className="oa-det-head rqd-head">
+          <div className="oa-det-avatar rqd-head-avatar" style={{ background: 'linear-gradient(135deg,var(--accent),var(--accent2))' }}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ stroke: '#fff' }}>
+              <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+          </div>
+          <div className="rqd-head-info">
+            <div className="rqd-head-title-row">
+              <span className="rqd-head-title">{niceDate}</span>
+              <span className="rqd-head-sep">|</span>
+              <span className="rqd-head-window">{programmes.length} programme{programmes.length === 1 ? '' : 's'}</span>
+            </div>
+          </div>
+          <button type="button" className="oa-det-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+        <div className="rqd-body" style={{ gridTemplateColumns: '1fr' }}>
+          <div className="rqd-main">
+            <div className="rqd-section">
+              <div className="rqd-section-head">
+                <div className="rqd-section-title">Programmes Running</div>
+                <div className="rqd-search" style={{ width: 280 }}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <input type="search" placeholder="Search programme, client, trainer…" value={q} onChange={(e) => setQ(e.target.value)} />
+                </div>
+                <div className="rqd-section-count">{visible.length}/{programmes.length}</div>
+              </div>
+              {visible.length === 0 ? (
+                <div className="rqd-empty">
+                  {programmes.length ? 'No matches for that search.' : 'No active programmes on this day.'}
+                </div>
+              ) : (
+                <div className="rqd-trainer-grid">
+                  {visible.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      className="rqd-trainer-card"
+                      style={{ textAlign: 'left', cursor: 'pointer' }}
+                      onClick={() => onPick(p)}
+                    >
+                      <div className="rqd-trainer-avatar">{(p.client || p.course || '?').slice(0, 2).toUpperCase()}</div>
+                      <div className="rqd-trainer-meta">
+                        <div className="rqd-trainer-name">
+                          <span className="rqd-trainer-name-text">{p.course || p.cell}</span>
+                        </div>
+                        <div className="rqd-trainer-sub">
+                          {p.client ? `${p.client} · ` : ''}{p.trainers.length} trainer{p.trainers.length === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -698,7 +912,7 @@ export default function Matrix({ active }) {
    that remain are NOT re-rendered, since `e`, `days` and `todayIso` keep
    stable references across filter changes. This is the main perf win for
    the 250-row × 50-col grid. */
-const MatrixRow = memo(function MatrixRow({ e, days, todayIso }) {
+const MatrixRow = memo(function MatrixRow({ e, days, todayIso, onCellPick }) {
   const sched = e.ref.schedule || {};
   return (
     <div style={{ display: 'contents' }}>
@@ -712,7 +926,14 @@ const MatrixRow = memo(function MatrixRow({ e, days, todayIso }) {
         const tip = parsed
           ? `${e.name} · ${d.iso}\n${STATE_LABEL[st]} · ${parsed.client ? parsed.client + ' · ' : ''}${parsed.course || cell}`
           : `${e.name} · ${d.iso}\n${STATE_LABEL[st]}${st === 'holiday' && cell.trim() ? ` · ${cell.trim()}` : ''}`;
-        return <div key={d.iso} className={`mx-cell is-${st}${d.iso === todayIso ? ' is-today' : ''}`} title={tip} />;
+        return (
+          <div
+            key={d.iso}
+            className={`mx-cell is-${st}${d.iso === todayIso ? ' is-today' : ''}${parsed ? ' is-pickable' : ''}`}
+            title={tip}
+            onClick={parsed && onCellPick ? () => onCellPick({ iso: d.iso, trainer: e.name, parsed }) : undefined}
+          />
+        );
       })}
     </div>
   );
