@@ -13,7 +13,7 @@ export default function StatusBar() {
       <span className="sb-clock" id="clock">
         UTC 11:48:22 · IST 17:18:22
       </span>
-      <span className="sb-version">v0.4.0 · CAPACITY PLANNER</span>
+      <span className="sb-version">v0.4.0 · ALLOCATION DASHBOARD · SWIFT OPS</span>
     </div>
   );
 }

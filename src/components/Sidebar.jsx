@@ -1,7 +1,16 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { NAV_ITEMS } from '../data/navigation.js';
 import { useGetRequestTrackQuery } from '../store/api.js';
 import { countPending } from '../lib/allocation.js';
+
+function useTheme() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  useEffect(() => {
+    document.body.classList.toggle('light', theme === 'light');
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+  return [theme, setTheme];
+}
 
 /** Live badge overrides. Any target listed here uses the computed value
  *  instead of the static badge from navigation.js. */
@@ -22,6 +31,7 @@ function getInitials(name) {
 
 export default function Sidebar({ user, activePanel, onNavigate, onOpenCmdk }) {
   const liveBadges = useLiveBadges();
+  const [theme, setTheme] = useTheme();
   return (
     <aside className="sidebar">
       <div className="logo" title="QLabs">
@@ -59,9 +69,27 @@ export default function Sidebar({ user, activePanel, onNavigate, onOpenCmdk }) {
 
       {/* Bottom Profile Avatar and Logout Actions */}
       <div className="sidebar-bottom" style={{ marginBottom: '16px' }}>
+        {/* Theme toggle (dark ↔ light) */}
+        <div
+          className="nav-item nav-theme"
+          data-tip={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          title="Toggle theme"
+        >
+          {theme === 'dark' ? (
+            <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ width: '18px', height: '18px', stroke: 'currentColor' }}>
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ width: '18px', height: '18px', stroke: 'currentColor' }}>
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+            </svg>
+          )}
+        </div>
         {/* Premium Secure Logout button */}
-        <div 
-          className="nav-item nav-logout" 
+        <div
+          className="nav-item nav-logout"
           data-tip="Secure Logout"
           onClick={() => {
             localStorage.removeItem('token');
@@ -71,14 +99,15 @@ export default function Sidebar({ user, activePanel, onNavigate, onOpenCmdk }) {
               window.showToast('Secure Logout', 'You have been successfully logged out.', 'ok');
             }
           }}
-          style={{ 
+          style={{
             color: 'var(--neon-red, #ff4444)',
             filter: 'drop-shadow(0 0 8px rgba(255, 68, 68, 0.15))'
           }}
           title="Secure Logout"
         >
-          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '18px', height: '18px', stroke: 'currentColor' }}>
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '18px', height: '18px', stroke: 'currentColor' }}>
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
           </svg>
         </div>
       </div>

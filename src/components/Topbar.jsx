@@ -1,4 +1,5 @@
 import React from 'react';
+import SyncButton from './SyncButton.jsx';
 
 function getInitials(name) {
   if (!name) return '?';
@@ -23,21 +24,15 @@ export default function Topbar({ user, activePanel }) {
   const name = user?.name || 'Madhesh P';
   const initials = getInitials(name);
   
-  // Custom display role matching the mockup
+  // Display role derived from the actual user payload.
   let displayRole = 'EMPLOYEE';
   if (user?.role) {
     const r = user.role.toLowerCase();
-    if (r === 'admin') {
-      displayRole = 'ADMIN';
-    } else if (r === 'teamlead' || r === 'lead') {
-      displayRole = 'EMPLOYEE';
-    } else {
-      displayRole = user.role.toUpperCase();
-    }
+    if (r === 'admin')                       displayRole = 'ADMIN';
+    else if (r === 'teamlead' || r === 'lead') displayRole = 'TEAM LEAD';
+    else if (r === 'manager')                displayRole = 'MANAGER';
+    else                                     displayRole = user.role.replace(/_/g, ' ').toUpperCase();
   }
-
-  // Get employee ID or fallback
-  const empId = user?.employee_id || user?.employeeId || 'NEO10486';
 
   return (
     <header className="topbar">
@@ -47,15 +42,17 @@ export default function Topbar({ user, activePanel }) {
       </div>
       
       <div className="topbar-spacer" />
-      
+
+      <div className="topbar-sync">
+        <SyncButton />
+      </div>
+
       <div className="topbar-profile">
         <div className="profile-info">
           <div className="profile-name">{name}</div>
-          <div className="profile-meta">
-            {empId} <span className="profile-dot-sep">•</span> {displayRole}
-          </div>
+          <div className="profile-meta">{displayRole}</div>
         </div>
-        
+
         <div className="profile-badge-wrapper">
           <div className="profile-badge">
             {initials}
