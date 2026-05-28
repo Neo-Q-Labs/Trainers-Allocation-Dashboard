@@ -16,7 +16,7 @@ const crossSkillsMap = [
 
 // Stable unique key for a conflict (used to track handled state)
 function conflictKey(c) {
-  return `${c.trainer}|${c.date}|${(c.delivery_ids || []).sort().join(',')}`;
+  return `${c.trainer}|${c.date}|${[...(c.delivery_ids || [])].sort().join(',')}`;
 }
 
 function mapKpis(summary, liveActive) {
