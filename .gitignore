@@ -10,8 +10,3 @@ yarn-error.log*
 .env.*
 !.env.example
 .claude/settings.local.json
-
-# Python bytecode cache
-__pycache__/
-*.pyc
-*.pyo
