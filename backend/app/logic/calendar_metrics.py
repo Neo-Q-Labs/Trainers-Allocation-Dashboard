@@ -92,23 +92,27 @@ def compute_calendar_data(parsed: dict[str, Any], year: int, month: int = None) 
     })
     
     for a in filtered_assignments:
+        # Skip status-only cells: "No Class", "Training Completed", "Not Yet Started"
+        # produce trainer="" in the parser — they do NOT represent active work.
+        trainer = a.get("trainer", "")
+        if not trainer:
+            continue
+
         date_str = a["date"]
         daily_data[date_str]["date"] = date_str
         daily_data[date_str]["demand"] += 1
-        
-        # Extract programme info
+
         programme = {
             "name": a.get("course_name", "Unknown Course"),
             "delivery_id": a.get("delivery_id", ""),
-            "trainer": a.get("trainer", ""),
+            "trainer": trainer,
             "campus": a.get("campus", ""),
             "track": _extract_track(a),
-            "client": _extract_client(a)
+            "client": _extract_client(a),
         }
-        
+
         daily_data[date_str]["events"].append(programme)
-        if programme["trainer"]:
-            daily_data[date_str]["trainers"].add(programme["trainer"])
+        daily_data[date_str]["trainers"].add(trainer)
         daily_data[date_str]["programmes"].add(programme["delivery_id"])
     
     # Convert sets to counts and clean up
@@ -326,7 +330,10 @@ def _extract_client(assignment: dict) -> str:
 
     Scans campus, course_name, and cell_value for known client tokens so that
     assignments written as 'SKG-MERN-Trainer' map to the correct client.
+    Priority order matters — check longer/more-specific tokens first.
     """
+    import re as _re
+
     text = " ".join(filter(None, [
         str(assignment.get("campus", "") or ""),
         str(assignment.get("course_name", "") or ""),
@@ -335,16 +342,32 @@ def _extract_client(assignment: dict) -> str:
 
     if "parul" in text:
         return "parul"
-    if "skg" in text or "sri krishna" in text:
+    # SKG group: SKG, SKCET (Sri Krishna College of Engineering & Technology),
+    # SKCT (Sri Krishna College of Technology), Sri Krishna (any campus)
+    if _re.search(r'\b(skg|skcet|skct|sri[\s_-]?krishna)\b', text):
         return "skg"
-    if "lti" in text or "ltimindtree" in text or "mindtree" in text:
+    # LTIMindtree — check ltimindtree before lti to avoid partial collisions
+    if _re.search(r'\b(ltimindtree|ltisa|mindtree)\b', text) or _re.search(r'\blti\b', text):
         return "lti"
-    if "kct" in text:
+    if _re.search(r'\bkct\b', text):
         return "kct"
     if "hexaware" in text:
         return "hexaware"
-    if "iamneo" in text or "iamneo" in text:
+    if "iamneo" in text:
         return "iamneo"
+    if "st.joseph" in text or "st joseph" in text or "stjoseph" in text:
+        return "stjoseph"
+    # VIT = Vellore Institute of Technology — use word boundary to avoid "activity"
+    if _re.search(r'\bvit\b', text) or "vellore institute" in text:
+        return "vit"
+    # REC = Rajalakshmi Engineering College — use word boundary to avoid "recent"
+    if _re.search(r'\brec\b', text) or "rajalakshmi" in text:
+        return "rec"
+    # BIT = Bannari Amman Institute of Technology — use word boundary
+    if _re.search(r'\bbit\b', text) or "bannari" in text:
+        return "bit"
+    if "virtusa" in text:
+        return "virtusa"
     return "other"
 
 

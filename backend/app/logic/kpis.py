@@ -28,20 +28,32 @@ def _month_label(iso_date: str) -> str:
     return datetime.fromisoformat(iso_date).strftime("%b %y")
 
 
+_COMPLETED_STATUSES = {"training completed", "completed"}
+
+
 def compute_kpis(parsed: dict[str, Any], conflicts: dict[str, Any] | None = None, trainer_roster: dict[str, Any] | None = None) -> dict[str, Any]:
     records = parsed["records"]
     assignments = parsed["assignments"]
     unique_deliveries = {r["delivery_id"] for r in records}
+    # Active = non-completed deliveries only
+    active_deliveries = {
+        r["delivery_id"] for r in records
+        if (r.get("status") or "").lower().strip() not in _COMPLETED_STATUSES
+    }
     trainers = {a["trainer"] for a in assignments if a.get("trainer")}
     status_counts = Counter(r["status"] or "Unknown" for r in records)
     campus_counts = Counter(r["campus"] or "Unknown" for r in records)
 
     # --- Frontend KPI strip fields ---
-    deliveries_with_trainers = {a["delivery_id"] for a in assignments if a.get("trainer")}
-    open_gap = len(unique_deliveries - deliveries_with_trainers)
+    # Only count active deliveries for allocation gap (completed ones are done — no gap)
+    active_with_trainers = {
+        a["delivery_id"] for a in assignments
+        if a.get("trainer") and a["delivery_id"] in active_deliveries
+    }
+    open_gap = len(active_deliveries - active_with_trainers)
     allocation_complete_pct = (
-        round(len(deliveries_with_trainers) / len(unique_deliveries) * 100)
-        if unique_deliveries else 0
+        round(len(active_with_trainers) / len(active_deliveries) * 100)
+        if active_deliveries else 0
     )
     monthly: dict[str, Counter[str]] = defaultdict(Counter)
 
@@ -149,8 +161,8 @@ def compute_kpis(parsed: dict[str, Any], conflicts: dict[str, Any] | None = None
             "severity": "low",
         })
 
-    # Daily Demand vs Capacity (30-day Outlook) starting 22 May 2026 to capture tracker data
-    start_date = date(2026, 5, 22)
+    # Daily Demand vs Capacity (30-day Outlook) starting today
+    start_date = date.today()
     outlook_days = []
 
     daily_internal = defaultdict(int)
@@ -212,13 +224,15 @@ def compute_kpis(parsed: dict[str, Any], conflicts: dict[str, Any] | None = None
 
     return {
         # Overview KPI strip — aligned to frontend overviewKpis shape
-        "active_requirements": len(unique_deliveries),
+        # active_requirements = non-completed deliveries (Ongoing + Upcoming)
+        "active_requirements": len(active_deliveries),
+        "total_deliveries": len(unique_deliveries),   # includes completed — for reference
         "trainers_on_ground": len(trainers),
         "trainer_roster_count": trainer_roster_count,
         "allocation_complete_pct": allocation_complete_pct,
         "open_gap": open_gap,
         # Aliases kept for backward-compat
-        "active_deliveries": len(unique_deliveries),
+        "active_deliveries": len(active_deliveries),
         "open_conflicts": open_conflict_count,
         "billable_rate": billable_pct,
         "status_breakdown": dict(status_counts),

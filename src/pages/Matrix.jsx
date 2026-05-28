@@ -56,7 +56,7 @@ const classifyCell = (cell) => {
   return 'trainer';
 };
 
-// Sunday is the weekly week-off → treated as Holiday.
+// Sunday is the weekly week-off → its own distinct state.
 const isWeekOff = (iso) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).getDay() === 0; // 0 = Sunday
@@ -68,25 +68,52 @@ const isNoClass = (cell) => {
   return s.includes('no class') || s.includes('noclass') || s.includes('no-class') || s.includes('holiday');
 };
 
-// Reduce a (cell, date) to one of: full | partial | holiday | leave | exit | free
+// Reduce a (cell, date) to one of: full | partial | weekoff | holiday | leave | exit | free
 const cellState = (cell, iso) => {
-  if (isNoClass(cell)) return 'holiday';          // "No Class" → Holiday
+  if (isNoClass(cell)) return 'holiday';          // "No Class" / Holiday cell
   const kind = classifyCell(cell);
   if (kind === 'exit') return 'exit';             // off-boarded
   if (kind === 'leave') return 'leave';           // temporary leave
   if (kind === 'trainer') return 'full';
   if (kind === 'ta' || kind === 'backup') return 'partial';
-  // free → Sunday week-off becomes holiday, otherwise empty
-  return isWeekOff(iso) ? 'holiday' : 'free';
+  // free → Sunday = Week Off (distinct red), otherwise truly free (empty)
+  return isWeekOff(iso) ? 'weekoff' : 'free';
 };
 
 const STATE_LABEL = {
   full:    'Fully Occupied',
   partial: 'Partially Occupied',
-  holiday: 'Holiday',
+  weekoff: 'Week Off',
+  holiday: 'No Class / Holiday',
   leave:   'Leave',
   free:    'Free',
 };
+
+// ---- Build allocation blocks from a trainer's schedule ----
+// Groups consecutive same-programme cells into date ranges for the drawer.
+function buildAllocationBlocks(schedule, days) {
+  const blocks = [];
+  let current = null;
+  for (const d of days) {
+    const cell = schedule[d.iso] || '';
+    const st = cellState(cell, d.iso);
+    if (st === 'full' || st === 'partial') {
+      const { client, course } = parseAssignment(cell);
+      const key = `${client}|${course}`;
+      if (current && current.key === key) {
+        current.endIso = d.iso;
+        current.days += 1;
+      } else {
+        if (current) blocks.push(current);
+        current = { key, client, course, role: st === 'partial' ? 'TA / Backup' : 'Trainer', startIso: d.iso, endIso: d.iso, days: 1, rawCell: cell };
+      }
+    } else {
+      if (current) { blocks.push(current); current = null; }
+    }
+  }
+  if (current) blocks.push(current);
+  return blocks;
+}
 
 // Parse "LTIM-MERN-Trainer" → { client: 'LTIM', course: 'MERN' }
 const parseAssignment = (cell) => {
@@ -169,15 +196,19 @@ const STATUS_FILTERS = [
   { id: 'exit',     label: 'EXIT' },
 ];
 
+const DIR_PAGE_SIZE = 24;
+
 export default function Matrix({ active }) {
   const { data, error, isLoading, refetch } = useGetTrainersQuery({ limit: 500 });
 
-  const [search, setSearch]           = useState('');
+  const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [trackFilter, setTrackFilter]   = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [poolFilter, setPoolFilter]     = useState('all');
   const [poolOpen, setPoolOpen]         = useState(false);
+  const [dirPage, setDirPage]           = useState(0);        // 0-based page index for directory
+  const [selectedTrainer, setSelectedTrainer] = useState(null); // trainer enriched obj for drawer
 
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => toIso(today), [today]);
@@ -342,13 +373,24 @@ export default function Matrix({ active }) {
     exit: enriched.filter((e) => e.pool === 'exit').length,
   }), [enriched]);
 
-  // Switching pool clears the track/client chips (their vocab changes).
+  // Switching pool clears the track/client filters (their vocab changes).
   const pickPool = (id) => {
     setPoolFilter(id);
     setTrackFilter('');
     setClientFilter('');
+    setDirPage(0);
     setPoolOpen(false);
   };
+
+  // Reset directory page when any filter changes.
+  const setTrackFilterResetting = (v) => { setTrackFilter(v); setDirPage(0); };
+  const setClientFilterResetting = (v) => { setClientFilter(v); setDirPage(0); };
+  const setSearchResetting = (v) => { setSearch(v); setDirPage(0); };
+  const setStatusFilterResetting = (v) => { setStatusFilter(v); setDirPage(0); };
+
+  const dirTotalPages = Math.max(1, Math.ceil(gridRows.length / DIR_PAGE_SIZE));
+  const dirPageSafe   = Math.min(dirPage, dirTotalPages - 1);
+  const dirRows       = gridRows.slice(dirPageSafe * DIR_PAGE_SIZE, (dirPageSafe + 1) * DIR_PAGE_SIZE);
 
   // ---- Export handler: 2 sheets, deduplicated ----
   const handleExport = () => {
@@ -479,14 +521,14 @@ export default function Matrix({ active }) {
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input placeholder="Search trainer or track…" value={search} onChange={(e) => setSearch(e.target.value)} />
-              {search && <button className="mx-search-clear" onClick={() => setSearch('')} aria-label="Clear">×</button>}
+              <input placeholder="Search trainer or track…" value={search} onChange={(e) => setSearchResetting(e.target.value)} />
+              {search && <button className="mx-search-clear" onClick={() => setSearchResetting('')} aria-label="Clear">×</button>}
             </div>
             <div className="mx-status-chips" role="tablist">
               {STATUS_FILTERS.map((s) => (
                 <button key={s.id} type="button" role="tab" aria-selected={statusFilter === s.id}
                   className={`mx-status-chip${statusFilter === s.id ? ' is-active' : ''}`}
-                  onClick={() => setStatusFilter(s.id)}>{s.label}</button>
+                  onClick={() => setStatusFilterResetting(s.id)}>{s.label}</button>
               ))}
             </div>
 
@@ -530,10 +572,30 @@ export default function Matrix({ active }) {
           </div>
         </header>
 
-        {/* Track filter */}
-        <ChipRow label="TRACK" chips={trackChips} value={trackFilter} onChange={setTrackFilter} />
-        {/* Client filter */}
-        <ChipRow label="CLIENT" chips={clientChips} value={clientFilter} onChange={setClientFilter} />
+        {/* Track + Client dropdowns */}
+        <div className="mx-filter-bar">
+          <FilterDropdown
+            label="TRACK"
+            icon={<svg viewBox="0 0 24 24" width="12" height="12" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>}
+            options={trackChips}
+            value={trackFilter}
+            onChange={setTrackFilterResetting}
+            allLabel="All Tracks"
+          />
+          <FilterDropdown
+            label="CLIENT"
+            icon={<svg viewBox="0 0 24 24" width="12" height="12" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>}
+            options={clientChips}
+            value={clientFilter}
+            onChange={setClientFilterResetting}
+            allLabel="All Clients"
+          />
+          {(trackFilter || clientFilter) && (
+            <button type="button" className="mx-filter-clear" onClick={() => { setTrackFilterResetting(''); setClientFilterResetting(''); }}>
+              Clear filters
+            </button>
+          )}
+        </div>
 
         {/* Grid */}
         <div className="mx-grid-wrap">
@@ -556,11 +618,12 @@ export default function Matrix({ active }) {
           </div>
         </div>
 
-        {/* Legend — exactly 4 states + free base */}
+        {/* Legend */}
         <div className="mx-legend">
           <span className="mx-leg"><span className="mx-leg-sw is-full" /> Fully Occupied</span>
           <span className="mx-leg"><span className="mx-leg-sw is-partial" /> Partially Occupied</span>
-          <span className="mx-leg"><span className="mx-leg-sw is-holiday" /> Holiday</span>
+          <span className="mx-leg"><span className="mx-leg-sw is-weekoff" /> Week Off</span>
+          <span className="mx-leg"><span className="mx-leg-sw is-holiday" /> No Class</span>
           <span className="mx-leg"><span className="mx-leg-sw is-leave" /> Leave</span>
           <span className="mx-leg"><span className="mx-leg-sw is-free" /> Free</span>
           <span className="mx-leg-count">
@@ -572,24 +635,60 @@ export default function Matrix({ active }) {
       {/* ===== Trainer Directory snapshot ===== */}
       <div className="card mx-dir">
         <header className="mx-dir-head">
-          <div className="mx-title">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
-              <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
-            </svg>
-            TRAINER DIRECTORY · SNAPSHOT
+          <div>
+            <div className="mx-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+              TRAINER DIRECTORY · SNAPSHOT
+            </div>
+            <div className="mx-dir-sub">
+              <strong>{totals.total}</strong> trainers monitored · <strong>{totals.internal}</strong> internal · <strong>{totals.freelancer}</strong> freelancer pool
+              <span className="mx-dir-sub-hint"> · Click a card to see allocations</span>
+            </div>
           </div>
-          <div className="mx-dir-sub">
-            <strong>{totals.total}</strong> trainers monitored · <strong>{totals.internal}</strong> internal · <strong>{totals.freelancer}</strong> freelancer pool
-          </div>
+          {dirTotalPages > 1 && (
+            <div className="mx-dir-pager">
+              <button type="button" className="mx-pager-btn" disabled={dirPageSafe === 0}
+                onClick={() => setDirPage((p) => Math.max(0, p - 1))} aria-label="Previous page">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <span className="mx-pager-info">
+                Page <strong>{dirPageSafe + 1}</strong> / <strong>{dirTotalPages}</strong>
+                <span className="mx-pager-total"> · {gridRows.length} trainers</span>
+              </span>
+              <button type="button" className="mx-pager-btn" disabled={dirPageSafe >= dirTotalPages - 1}
+                onClick={() => setDirPage((p) => Math.min(dirTotalPages - 1, p + 1))} aria-label="Next page">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          )}
         </header>
         <div className="mx-dir-grid">
-          {gridRows.slice(0, 24).map((e) => <DirectoryCard key={`d-${e.employee_id || ''}-${e.name}`} e={e} />)}
+          {dirRows.map((e) => (
+            <DirectoryCard
+              key={`d-${e.employee_id || ''}-${e.name}`}
+              e={e}
+              onClick={() => setSelectedTrainer(e)}
+            />
+          ))}
         </div>
-        {gridRows.length > 24 && (
-          <div className="mx-dir-foot">Showing first <strong>24</strong> of <strong>{gridRows.length}</strong> matching trainers — refine filters to narrow.</div>
+        {gridRows.length > DIR_PAGE_SIZE && (
+          <div className="mx-dir-foot">
+            Showing <strong>{dirPageSafe * DIR_PAGE_SIZE + 1}–{Math.min((dirPageSafe + 1) * DIR_PAGE_SIZE, gridRows.length)}</strong> of <strong>{gridRows.length}</strong> matching trainers
+          </div>
         )}
       </div>
+
+      {/* ===== Trainer Allocation Drawer ===== */}
+      {selectedTrainer && (
+        <TrainerDrawer
+          trainer={selectedTrainer}
+          days={days}
+          onClose={() => setSelectedTrainer(null)}
+        />
+      )}
     </section>
   );
 }
@@ -619,18 +718,26 @@ const MatrixRow = memo(function MatrixRow({ e, days, todayIso }) {
   );
 });
 
-/* ----- filter chip row ----- */
-function ChipRow({ label, chips, value, onChange }) {
+/* ----- filter dropdown ----- */
+function FilterDropdown({ label, icon, options, value, onChange, allLabel }) {
   return (
-    <div className="mx-chiprow">
-      <span className="mx-chiprow-label">{label}</span>
-      <button type="button" className={`mx-chip${!value ? ' is-active' : ''}`} onClick={() => onChange('')}>All</button>
-      {chips.map((c) => (
-        <button key={c} type="button" className={`mx-chip${value === c ? ' is-active' : ''}`}
-          onClick={() => onChange(value === c ? '' : c)} title={c}>
-          {c.length > 16 ? c.slice(0, 15) + '…' : c}
-        </button>
-      ))}
+    <div className="mx-flt">
+      <label className="mx-flt-label">{icon}{label}</label>
+      <div className="mx-flt-wrap">
+        <select
+          className="mx-flt-sel"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">{allLabel || `All ${label}s`}</option>
+          {options.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+        <svg className="mx-flt-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -642,12 +749,14 @@ const STATUS_PILL = {
   leave:    { label: 'ON LEAVE',       tone: 'leave' },
   exit:     { label: 'EXITED',         tone: 'exit' },
 };
-function DirectoryCard({ e }) {
+function DirectoryCard({ e, onClick }) {
   const pill = e.pool === 'exit' ? STATUS_PILL.exit : (STATUS_PILL[e.status] || STATUS_PILL.free);
   const loadTone = e.stats.load >= 85 ? 'high' : e.stats.load >= 50 ? 'mid' : 'low';
   const skill = Array.from(e.trackToks).slice(0, 2).join(' / ').toUpperCase() || '—';
   return (
-    <div className={`mx-dcard mx-dcard-${pill.tone}`}>
+    <div className={`mx-dcard mx-dcard-${pill.tone} mx-dcard-clickable`} onClick={onClick} role="button" tabIndex={0}
+      onKeyDown={(ev) => ev.key === 'Enter' && onClick?.()}
+      title={`View ${e.name}'s allocations`}>
       <div className="mx-dcard-top">
         <span className="mx-dcard-avatar">{initials(e.name)}</span>
         <div className="mx-dcard-id">
@@ -665,6 +774,129 @@ function DirectoryCard({ e }) {
         <div className="mx-stat"><span className={`mx-stat-num${e.stats.leave > 0 ? ' is-leave' : ''}`}>{e.stats.leave}</span><span className="mx-stat-lab">LEAVE</span></div>
         <div className="mx-stat"><span className={`mx-stat-num is-${loadTone}`}>{e.stats.load}%</span><span className="mx-stat-lab">LOAD</span></div>
       </div>
+      <div className="mx-dcard-chevron">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </div>
     </div>
+  );
+}
+
+/* ----- trainer allocation drawer ----- */
+const fmtIso = (iso) => {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); }
+  catch { return iso; }
+};
+
+const TRACK_COLORS = {
+  'Java FS': '#6366f1', 'Python / ML': '#22d3a5', '.NET / Cloud': '#06b6d4',
+  'Web / React': '#f5c542', 'Cyber / QA': '#a855f7', 'SQL / DB': '#fb923c',
+  'SAP': '#10b981', 'DSA': '#e879f9', 'C / C++': '#64748b', 'Aptitude': '#f97316',
+};
+const trackColor = (toks) => {
+  if (!toks || toks.size === 0) return 'var(--text-muted)';
+  const first = [...toks][0];
+  return TRACK_COLORS[first] || 'var(--text-muted)';
+};
+
+function TrainerDrawer({ trainer, days, onClose }) {
+  const sched = trainer.ref.schedule || {};
+  const blocks = buildAllocationBlocks(sched, days);
+  const pill = trainer.pool === 'exit' ? STATUS_PILL.exit : (STATUS_PILL[trainer.status] || STATUS_PILL.free);
+  const skill = Array.from(trainer.trackToks).join(', ').toUpperCase() || '—';
+  const clients = Array.from(trainer.clientSet).join(', ') || '—';
+  const accentColor = trackColor(trainer.trackToks);
+
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="mx-drawer-overlay" onClick={onClose} />
+      <aside className="mx-drawer" role="dialog" aria-label={`${trainer.name} allocations`}>
+        {/* Header */}
+        <div className="mx-drawer-head">
+          <div className="mx-drawer-avatar" style={{ background: accentColor + '22', borderColor: accentColor + '55', color: accentColor }}>
+            {initials(trainer.name)}
+          </div>
+          <div className="mx-drawer-ident">
+            <div className="mx-drawer-name">{trainer.name}</div>
+            <div className="mx-drawer-sub">{trainer.employee_id || '—'} · {trainer.isInternal ? 'Internal' : 'Freelancer'}</div>
+          </div>
+          <button className="mx-drawer-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Quick stats */}
+        <div className="mx-drawer-stats">
+          <div className="mx-drawer-stat">
+            <span className="mx-drawer-stat-n" style={{ color: '#22d3a5' }}>{trainer.stats.avail}</span>
+            <span className="mx-drawer-stat-l">Free Days</span>
+          </div>
+          <div className="mx-drawer-stat">
+            <span className="mx-drawer-stat-n" style={{ color: '#4f86c6' }}>{trainer.stats.allocated}</span>
+            <span className="mx-drawer-stat-l">Allocated</span>
+          </div>
+          <div className="mx-drawer-stat">
+            <span className="mx-drawer-stat-n" style={{ color: trainer.stats.leave > 0 ? '#f59e0b' : 'var(--text-muted)' }}>{trainer.stats.leave}</span>
+            <span className="mx-drawer-stat-l">Leave</span>
+          </div>
+          <div className="mx-drawer-stat">
+            <span className="mx-drawer-stat-n" style={{ color: trainer.stats.load >= 85 ? '#ef4444' : trainer.stats.load >= 50 ? '#f59e0b' : '#22d3a5' }}>{trainer.stats.load}%</span>
+            <span className="mx-drawer-stat-l">Load</span>
+          </div>
+        </div>
+
+        {/* Skills + clients */}
+        <div className="mx-drawer-meta">
+          <div className="mx-drawer-meta-row"><span className="mx-drawer-meta-key">Tracks</span><span className="mx-drawer-meta-val">{skill}</span></div>
+          <div className="mx-drawer-meta-row"><span className="mx-drawer-meta-key">Clients</span><span className="mx-drawer-meta-val">{clients}</span></div>
+        </div>
+
+        {/* Allocation blocks */}
+        <div className="mx-drawer-section-title">
+          PROGRAMME ALLOCATIONS
+          <span className="mx-drawer-section-badge">{blocks.length} block{blocks.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        {blocks.length === 0 ? (
+          <div className="mx-drawer-empty">No allocations in the selected date window.</div>
+        ) : (
+          <div className="mx-drawer-blocks">
+            {blocks.map((b, i) => {
+              const tc = deriveTracks(`${b.course} ${b.rawCell}`);
+              const bColor = TRACK_COLORS[tc[0]] || '#64748b';
+              return (
+                <div key={i} className="mx-drawer-block" style={{ borderLeftColor: bColor }}>
+                  <div className="mx-drawer-block-head">
+                    <span className="mx-drawer-block-course">{b.course || b.rawCell || 'Unknown'}</span>
+                    <span className="mx-drawer-block-role" style={{ color: b.role === 'TA / Backup' ? '#f59e0b' : '#4f86c6' }}>{b.role}</span>
+                  </div>
+                  <div className="mx-drawer-block-meta">
+                    {b.client && <span className="mx-drawer-block-client">{b.client}</span>}
+                    <span className="mx-drawer-block-dates">{fmtIso(b.startIso)} → {fmtIso(b.endIso)}</span>
+                    <span className="mx-drawer-block-days">{b.days}d</span>
+                  </div>
+                  {tc.length > 0 && (
+                    <div className="mx-drawer-block-tracks">
+                      {tc.map((t) => <span key={t} className="mx-drawer-block-track" style={{ background: (TRACK_COLORS[t] || '#64748b') + '22', color: TRACK_COLORS[t] || '#64748b' }}>{t}</span>)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </aside>
+    </>
   );
 }

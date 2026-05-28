@@ -19,7 +19,7 @@ import { exportToExcel } from '../lib/exportExcel.js';
    enriched from /deliveries. No mock data.
    ============================================================ */
 
-const TODAY = new Date(2026, 4, 22); // app "today" anchor (22 May 2026)
+const TODAY = new Date(); // real current date — drives "today" highlight across all views
 const CAPACITY = 42;
 
 const DOW   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -32,13 +32,18 @@ const TRACK_LABEL = {
   testing: 'Testing / QA', data: 'Data / Analytics', cyber: 'Cyber Security', sap: 'SAP', other: 'Other',
 };
 const CLIENT_META = {
-  parul:    { color: '#818cf8', label: 'Parul Univ' },
-  skg:      { color: '#22d3a5', label: 'SKG' },
-  lti:      { color: '#06b6d4', label: 'LTIMindtree' },
-  kct:      { color: '#f5c542', label: 'KCT' },
-  hexaware: { color: '#fb923c', label: 'Hexaware' },
-  iamneo:   { color: '#a855f7', label: 'iamneo' },
-  other:    { color: '#94a3b8', label: 'Other' },
+  parul:    { color: '#6366f1', label: 'Parul Univ' },    // Indigo
+  skg:      { color: '#34d399', label: 'SKG' },           // Emerald
+  lti:      { color: '#06b6d4', label: 'LTIMindtree' },   // Cyan
+  kct:      { color: '#fbbf24', label: 'KCT' },           // Amber
+  hexaware: { color: '#f97316', label: 'Hexaware' },      // Orange
+  iamneo:   { color: '#c084fc', label: 'iamneo' },        // Purple
+  stjoseph: { color: '#ef4444', label: 'St. Joseph' },    // Red
+  vit:      { color: '#22d3a5', label: 'VIT' },           // Green
+  rec:      { color: '#f472b6', label: 'REC' },           // Pink
+  bit:      { color: '#3b82f6', label: 'BIT' },           // Blue
+  virtusa:  { color: '#a78bfa', label: 'Virtusa' },       // Violet
+  other:    { color: '#64748b', label: 'Other' },         // Gray
 };
 const clientColor = (c) => CLIENT_META[c]?.color || CLIENT_META.other.color;
 const clientLabel = (c) => CLIENT_META[c]?.label || (c ? c.toUpperCase() : 'Other');
@@ -79,6 +84,9 @@ export default function Calendar({ active }) {
   const [modalDate, setModalDate] = useState(null);          // ISO string of clicked day
   const [ganttSearch, setGanttSearch] = useState('');
   const [trainerToggle, setTrainerToggle] = useState('engaged');
+  // 'all' = show every programme active on the day (month / quarter / year)
+  // 'starting' = show only programmes whose delivery starts on that day (week view)
+  const [modalMode, setModalMode] = useState('all');
 
   const cursorYear = cursor.getFullYear();
 
@@ -116,30 +124,60 @@ export default function Calendar({ active }) {
     return { trackOpts: tOpts, clientOpts: cOpts };
   }, [calendarData]);
 
-  // Filtered + grouped programmes for a given ISO date. Backend events are
-  // per-assignment (trainer × delivery × day), so we collapse them into one
-  // entry per delivery with its set of trainers for that day.
+  // Filtered + grouped programmes for a given ISO date.
+  // Only events with an assigned trainer are counted — status-only cells
+  // ("No Class", "Training Completed", "Not Yet Started") arrive as trainer=""
+  // from the backend and are excluded here so the count reflects real activity.
   const dayData = useCallback((iso) => {
     const raw = calendarData[iso] || { events: [] };
+    // 1. Apply track / client filters AND drop status-only (empty trainer) events.
     const filtered = (raw.events || []).filter((e) => {
+      if (!e.trainer) return false;                         // status cell — skip
       if (trackF && e.track !== trackF) return false;
       if (clientF && e.client !== clientF) return false;
       return true;
     });
+    // 2. Collapse per-assignment events into one entry per delivery.
     const map = new Map();
     for (const e of filtered) {
       const key = e.delivery_id || e.name || JSON.stringify(e);
       if (!map.has(key)) {
-        map.set(key, { name: e.name, delivery_id: e.delivery_id, campus: e.campus, track: e.track, client: e.client, trainers: new Set() });
+        map.set(key, {
+          name: e.name, delivery_id: e.delivery_id,
+          campus: e.campus, track: e.track, client: e.client,
+          trainers: new Set(),
+        });
       }
-      if (e.trainer) map.get(key).trainers.add(e.trainer);
+      map.get(key).trainers.add(e.trainer);
     }
     const programmes = [...map.values()].map((g) => ({ ...g, trainers: [...g.trainers] }));
-    const trainerCount = new Set(filtered.map((e) => e.trainer).filter(Boolean)).size;
+    const trainerCount = new Set(filtered.map((e) => e.trainer)).size;
     return { programmes, assignments: filtered.length, trainerCount };
   }, [calendarData, trackF, clientF]);
 
-  const openDay = useCallback((d) => setModalDate(isoKey(d)), []);
+  // Month / quarter / year click → show all active programmes for that date
+  const openDay = useCallback((d) => {
+    setModalDate(isoKey(d));
+    setModalMode('all');
+  }, []);
+
+  // Week click → show only programmes that START on that date (less clutter)
+  const openDayWeek = useCallback((d) => {
+    setModalDate(isoKey(d));
+    setModalMode('starting');
+  }, []);
+
+  // Variant of dayData filtered to deliveries whose start_date === iso.
+  // Falls back to showing the programme if no enrichment data is available.
+  const dayDataStarting = useCallback((iso) => {
+    const base = dayData(iso);
+    const startingProgs = base.programmes.filter((p) => {
+      const del = deliveryById.get(p.delivery_id);
+      if (!del) return true; // no enrichment → include rather than hide
+      return del.start_date === iso;
+    });
+    return { ...base, programmes: startingProgs };
+  }, [dayData, deliveryById]);
 
   // ---- Navigation ----
   const shift = (dir) => {
@@ -245,19 +283,6 @@ export default function Calendar({ active }) {
           </div>
         </div>
 
-        {/* ---- View body ---- */}
-        <div className="gc-body">
-          {loadingYear && !yearRes ? (
-            <div className="gc-loading">Loading…</div>
-          ) : view === 'month'   ? <MonthView  cursor={cursor} dayData={dayData} onDay={openDay} />
-            : view === 'week'    ? <WeekView   selected={selected} dayData={dayData} onDay={openDay} />
-            : view === 'quarter' ? <MiniGrid   months={quarterMonths(cursor)} cols={3} dayData={dayData} onDay={openDay} />
-            : view === 'year'    ? <MiniGrid   months={yearMonths(cursorYear)} cols={4} dayData={dayData} onDay={openDay} />
-            : <GanttView gantt={ganttRes} loading={loadingGantt} cursor={cursor}
-                         search={ganttSearch} setSearch={setGanttSearch}
-                         toggle={trainerToggle} setToggle={setTrainerToggle} />}
-        </div>
-
         {/* ---- Legend ---- */}
         {view !== 'gantt' && (
           <div className="gc-legend">
@@ -272,13 +297,27 @@ export default function Calendar({ active }) {
             ))}
           </div>
         )}
+
+        {/* ---- View body ---- */}
+        <div className="gc-body">
+          {loadingYear && !yearRes ? (
+            <div className="gc-loading">Loading…</div>
+          ) : view === 'month'   ? <MonthView  cursor={cursor} dayData={dayData} onDay={openDay} />
+            : view === 'week'    ? <WeekView   selected={selected} dayData={dayData} onDay={openDayWeek} />
+            : view === 'quarter' ? <MiniGrid   months={quarterMonths(cursor)} cols={3} dayData={dayData} onDay={openDay} />
+            : view === 'year'    ? <MiniGrid   months={yearMonths(cursorYear)} cols={4} dayData={dayData} onDay={openDay} />
+            : <GanttView gantt={ganttRes} loading={loadingGantt} cursor={cursor}
+                         search={ganttSearch} setSearch={setGanttSearch}
+                         toggle={trainerToggle} setToggle={setTrainerToggle} />}
+        </div>
       </div>
 
       {modalDate && (
         <DayDetailModal
           iso={modalDate}
-          data={dayData(modalDate)}
+          data={modalMode === 'starting' ? dayDataStarting(modalDate) : dayData(modalDate)}
           deliveryById={deliveryById}
+          scopeNote={modalMode === 'starting' ? 'Programmes starting on this date' : null}
           onClose={() => setModalDate(null)}
         />
       )}
@@ -319,24 +358,30 @@ function MonthView({ cursor, dayData, onDay }) {
       ))}
       {cells.map((d, i) => {
         const iso = isoKey(d);
-        const { programmes } = dayData(iso);
+        const { programmes, trainerCount } = dayData(iso);
         const inMonth = d.getMonth() === cursor.getMonth();
         const isToday = sameDate(d, TODAY);
         const we = d.getDay() === 0 || d.getDay() === 6;
+        // Unique clients for the coloured-dot strip (up to 5)
+        const uniqueClients = [...new Set(programmes.map((p) => p.client))].slice(0, 5);
         return (
           <div key={i}
             className={`gc-cell${inMonth ? '' : ' out'}${we ? ' we' : ''}${isToday ? ' today' : ''}`}
             onClick={() => onDay(d)}>
             <div className="gc-cell-num">{d.getDate()}</div>
             <div className="gc-cell-events">
-              {programmes.slice(0, 3).map((p, ei) => (
-                <div key={ei} className="gc-chip" style={{ '--c': clientColor(p.client) }}
-                  title={`${p.name} · ${clientLabel(p.client)} · ${p.trainers.length} trainer(s)`}>
-                  <span className="gc-chip-dot" />
-                  <span className="gc-chip-txt">{cleanEventName(p.name)}</span>
+              {programmes.length > 0 && (
+                <div className="gc-cell-summary"
+                  title={`${programmes.length} active programme(s) · ${trainerCount} trainer(s)`}>
+                  <span className="gc-count-num">{programmes.length}</span>
+                  <span className="gc-count-lbl">active</span>
+                  <div className="gc-count-dots">
+                    {uniqueClients.map((c, ci) => (
+                      <span key={ci} className="gc-count-dot" style={{ background: clientColor(c) }} />
+                    ))}
+                  </div>
                 </div>
-              ))}
-              {programmes.length > 3 && <div className="gc-more">+{programmes.length - 3} more</div>}
+              )}
             </div>
           </div>
         );
@@ -347,6 +392,8 @@ function MonthView({ cursor, dayData, onDay }) {
 
 /* ============================================================
    Week view — 7 day columns
+   Count badge instead of listing all chips.
+   Click opens modal scoped to programmes STARTING that day.
    ============================================================ */
 function WeekView({ selected, dayData, onDay }) {
   const days = weekDays(selected);
@@ -354,9 +401,10 @@ function WeekView({ selected, dayData, onDay }) {
     <div className="gc-week">
       {days.map((d, i) => {
         const iso = isoKey(d);
-        const { programmes } = dayData(iso);
+        const { programmes, trainerCount } = dayData(iso);
         const isToday = sameDate(d, TODAY);
         const we = d.getDay() === 0 || d.getDay() === 6;
+        const uniqueClients = [...new Set(programmes.map((p) => p.client))].slice(0, 4);
         return (
           <div key={i} className={`gc-week-col${we ? ' we' : ''}${isToday ? ' today' : ''}`} onClick={() => onDay(d)}>
             <div className="gc-week-head">
@@ -366,13 +414,21 @@ function WeekView({ selected, dayData, onDay }) {
             <div className="gc-week-events">
               {programmes.length === 0 ? (
                 <div className="gc-week-empty">—</div>
-              ) : programmes.map((p, ei) => (
-                <div key={ei} className="gc-wchip" style={{ '--c': clientColor(p.client) }}
-                  title={`${p.name} · ${clientLabel(p.client)} · ${p.trainers.length} trainer(s)`}>
-                  <span className="gc-wchip-name">{cleanEventName(p.name)}</span>
-                  <span className="gc-wchip-sub">{p.trainers.length} trainer{p.trainers.length === 1 ? '' : 's'}</span>
+              ) : (
+                <div className="gc-wcount"
+                  title={`${programmes.length} active programme(s) · ${trainerCount} trainer(s) · click to see programmes starting today`}>
+                  <span className="gc-wcount-n">{programmes.length}</span>
+                  <span className="gc-wcount-lbl">active</span>
+                  {trainerCount > 0 && (
+                    <span className="gc-wcount-trainers">{trainerCount} trainer{trainerCount === 1 ? '' : 's'}</span>
+                  )}
+                  <div className="gc-count-dots">
+                    {uniqueClients.map((c, ci) => (
+                      <span key={ci} className="gc-count-dot" style={{ background: clientColor(c) }} />
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         );
@@ -396,14 +452,22 @@ function MiniGrid({ months, cols, dayData, onDay }) {
             <div className="gc-mini-week">{DOW_S.map((d, i) => <span key={i}>{d}</span>)}</div>
             <div className="gc-mini-days">
               {cells.map((d, i) => {
-                const { programmes, assignments } = dayData(isoKey(d));
+                const { programmes, trainerCount } = dayData(isoKey(d));
                 const inMonth = d.getMonth() === m;
                 const isToday = sameDate(d, TODAY);
-                const lvl = assignments === 0 ? 'l0' : assignments > CAPACITY ? 'l5' : assignments >= 35 ? 'l4' : assignments >= 20 ? 'l3' : assignments >= 10 ? 'l2' : 'l1';
+                // Heat level based on trainer utilisation vs capacity (42).
+                // Falls back to l1 if there are programmes but no trainers yet assigned.
+                const lvl = programmes.length === 0
+                  ? 'l0'
+                  : trainerCount >= CAPACITY     ? 'l5'  // at/over capacity → red
+                  : trainerCount >= 35           ? 'l4'  // 83%+ → orange
+                  : trainerCount >= 20           ? 'l3'  // 48%+ → yellow
+                  : trainerCount >= 5            ? 'l2'  // 12%+ → mid-green
+                  : 'l1';                                 // <5 trainers or unassigned → light-green
                 return (
                   <button key={i} type="button"
                     className={`gc-mini-day ${lvl}${inMonth ? '' : ' out'}${isToday ? ' today' : ''}`}
-                    title={`${d.toDateString()} · ${programmes.length} programme(s) · ${assignments} assignment(s)`}
+                    title={`${d.toDateString()} · ${programmes.length} programme(s) · ${trainerCount} trainer(s)`}
                     onClick={() => onDay(d)}>
                     {d.getDate()}
                   </button>
@@ -551,7 +615,7 @@ function SearchSelect({ label, value, options, onChange }) {
 /* ============================================================
    Day detail modal — all programmes for the clicked date
    ============================================================ */
-function DayDetailModal({ iso, data, deliveryById, onClose }) {
+function DayDetailModal({ iso, data, deliveryById, scopeNote, onClose }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -573,6 +637,9 @@ function DayDetailModal({ iso, data, deliveryById, onClose }) {
           </div>
           <div className="oa-det-info">
             <div className="oa-det-name">{niceDate}</div>
+            {scopeNote && (
+              <div className="gc-modal-scope">{scopeNote}</div>
+            )}
             <div className="oa-det-sub">
               <span className="oa-tbl-avail oa-avail-full">{programmes.length} programme{programmes.length === 1 ? '' : 's'}</span>
               <span className="oa-tbl-pool oa-pool-int">{trainerCount} trainer{trainerCount === 1 ? '' : 's'}</span>

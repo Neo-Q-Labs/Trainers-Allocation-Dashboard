@@ -24,6 +24,8 @@ def compute_pending(parsed: dict[str, Any]) -> dict[str, Any]:
         if item.get("trainer"):
             delivery_trainer_dates[did].add(item["date"])
 
+    _COMPLETED = {"training completed", "completed"}
+
     # Index records by delivery_id (keep first occurrence)
     unique_records: dict[str, dict[str, Any]] = {}
     for r in records:
@@ -35,6 +37,11 @@ def compute_pending(parsed: dict[str, Any]) -> dict[str, Any]:
     slots: list[dict[str, Any]] = []
 
     for did, record in unique_records.items():
+        # Skip deliveries that are already completed — they have no open pending slots
+        status_val = (record.get("status") or "").lower().strip()
+        if status_val in _COMPLETED:
+            continue
+
         total_dates = len(delivery_dates.get(did, set()))
         filled_dates = len(delivery_trainer_dates.get(did, set()))
         gap = max(0, total_dates - filled_dates)
