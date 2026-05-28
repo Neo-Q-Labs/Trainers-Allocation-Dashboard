@@ -2,6 +2,15 @@ import { useMemo, useState, useRef, useEffect } from 'react';
 import { useGetRequestTrackQuery } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import ExportButton from '../components/ExportButton.jsx';
+import DatePicker from '../components/DatePicker.jsx';
+import RequirementModal from '../components/RequirementModal.jsx';
+import {
+  parseSheetDate, fmtFull,
+  STATUS_TONE, TYPE_TONE,
+  MONTHS_CAP,
+  windowLabel,
+  buildRequirementRow,
+} from '../lib/req.js';
 import { exportToExcel } from '../lib/exportExcel.js';
 
 /* ============================================================
@@ -13,87 +22,73 @@ import { exportToExcel } from '../lib/exportExcel.js';
    status chips, and a real horizontal Gantt timeline.
    ============================================================ */
 
-const parseNum = (v) => {
-  if (v == null || v === '') return 0;
-  const n = parseInt(String(v).trim(), 10);
-  return Number.isFinite(n) ? n : 0;
-};
-
-const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
-const MONTHS_3 = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-const MONTHS_CAP = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function parseSheetDate(raw) {
-  if (raw == null || raw === '') return null;
-  if (typeof raw === 'number' && Number.isFinite(raw)) return new Date(EXCEL_EPOCH + raw * 86400000);
-  const s = String(raw).trim();
-  if (!s) return null;
-  if (/^\d+(\.\d+)?$/.test(s)) return new Date(EXCEL_EPOCH + Number(s) * 86400000);
-  const m = s.match(/^(\d{1,2})[\s\-/](\d{1,2}|[A-Za-z]{3,9})[\s\-/](\d{2,4})$/);
-  if (m) {
-    const day = parseInt(m[1], 10);
-    let month;
-    if (/^\d+$/.test(m[2])) month = parseInt(m[2], 10) - 1;
-    else month = MONTHS_3.findIndex((mm) => m[2].toLowerCase().startsWith(mm));
-    if (month < 0) return null;
-    let year = parseInt(m[3], 10);
-    if (year < 100) year += 2000;
-    return new Date(Date.UTC(year, month, day));
-  }
-  const ts = Date.parse(s);
-  return Number.isFinite(ts) ? new Date(ts) : null;
-}
+const STATUS_FILTERS = ['ALL', 'OPEN', 'CLOSED', 'CANCELLED'];
+const TYPE_OPTIONS = ['INTERNAL', 'FREELANCER', 'MIXED', 'UNASSIGNED'];
 
 const fmtShort = (d) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—');
-const fmtFull  = (d) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
-function deriveType(row) {
-  const internal = parseNum(row['Internal']);
-  const fl = parseNum(row['Existing Freelancers']) + parseNum(row['New Freelancers Hired']) + parseNum(row['New Freelancer Required']);
-  if (internal > 0 && fl > 0) return 'MIXED';
-  if (fl > 0 && internal === 0) return 'FREELANCER';
-  if (internal > 0) return 'INTERNAL';
-  return 'UNASSIGNED';                 // no allocation data yet
+/* ----- Date range column (header w/ icon-only Reset+Apply, body w/ two DatePickers) ----- */
+function DateRangeColumn({ start, end, onApply }) {
+  const [pStart, setPStart] = useState(start);
+  const [pEnd, setPEnd]     = useState(end);
+  useEffect(() => { setPStart(start); setPEnd(end); }, [start, end]);
+
+  const invalid = !!pStart && !!pEnd && pEnd < pStart;
+  const dirty = pStart !== start || pEnd !== end;
+  const both  = !!pStart && !!pEnd && !invalid;
+  const days  = both ? Math.round((new Date(pEnd) - new Date(pStart)) / 86400000) + 1 : 0;
+
+  const apply = () => { if (!invalid && dirty) onApply(pStart, pEnd); };
+  const reset = () => { setPStart(''); setPEnd(''); onApply('', ''); };
+  const hasAny = !!(pStart || pEnd || start || end);
+
+  return (
+    <section className="rq-filter-col rq-filter-col-date">
+      <header className="rq-filter-col-head">
+        <span className="rq-filter-section-label">Date Range</span>
+        <span className="rq-date-head-tools">
+          {both && <span className="drf-badge">{days}d</span>}
+          {invalid && <span className="drf-badge is-err">End ≥ Start</span>}
+          <button
+            type="button"
+            className="rq-icon-btn"
+            aria-label="Reset date range"
+            title="Reset date range"
+            disabled={!hasAny}
+            onClick={reset}
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="rq-icon-btn is-primary"
+            aria-label="Apply date range"
+            title="Apply date range"
+            disabled={invalid || !dirty}
+            onClick={apply}
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </button>
+        </span>
+      </header>
+      <div className="rq-filter-col-body rq-filter-col-date-body">
+        <div className="rq-date-field">
+          <span className="rq-date-flabel">Start</span>
+          <DatePicker value={pStart} onChange={setPStart} max={pEnd} ariaLabel="Start date" />
+        </div>
+        <div className="rq-date-field">
+          <span className="rq-date-flabel">End</span>
+          <DatePicker value={pEnd} onChange={setPEnd} min={pStart} ariaLabel="End date" />
+        </div>
+      </div>
+    </section>
+  );
 }
-
-function deriveStatus(row) {
-  const a = String(row['Allocation Status'] || '').toLowerCase();
-  const t = String(row['Training Status'] || '').toLowerCase();
-  if (/cancel|drop/.test(a) || /cancel|drop/.test(t)) return 'CANCELLED';
-  if (/closed?|complete/.test(a) || /closed?|complete/.test(t)) return 'CLOSED';
-  return 'OPEN';
-}
-
-function summarise(row) {
-  const trainerReq = parseNum(row['Total Trainer Required']);
-  const taReq      = parseNum(row["Total TA's Required"]);
-  const required   = trainerReq + taReq;
-  const internal   = parseNum(row['Internal']);
-  const fl = parseNum(row['Existing Freelancers']) + parseNum(row['New Freelancers Hired']);
-  const filled = internal + fl;
-  const gap = Math.max(0, required - filled);
-  return { trainerReq, taReq, required, internal, fl_filled: fl, filled, gap };
-}
-
-function deriveRisk(row, gap) {
-  const cell = String(row['Risk'] || '').trim();
-  const explicit = parseInt(cell.replace(/[^\d]/g, ''), 10);
-  if (Number.isFinite(explicit) && /\d/.test(cell)) return explicit;
-  return gap;
-}
-
-const riskTone = (risk) => (risk >= 10 ? 'high' : risk >= 4 ? 'med' : risk > 0 ? 'low' : 'none');
-const STATUS_TONE = { OPEN: 'open', CLOSED: 'closed', CANCELLED: 'cancelled' };
-const TYPE_TONE   = { INTERNAL: 'internal', FREELANCER: 'freelancer', MIXED: 'mixed', UNASSIGNED: 'unassigned' };
-
-function windowLabel(start, end) {
-  if (start && end) return `${fmtShort(start)} → ${fmtShort(end)}`;
-  if (start) return `from ${fmtShort(start)}`;
-  if (end)   return `until ${fmtShort(end)}`;
-  return '—';
-}
-
-const STATUS_FILTERS = ['ALL', 'OPEN', 'CLOSED', 'CANCELLED'];
 
 /* ----- Searchable dropdown (app-themed) ----- */
 function SearchSelect({ label, value, options, onChange, placeholder = 'All' }) {
@@ -172,6 +167,13 @@ function SearchSelect({ label, value, options, onChange, placeholder = 'All' }) 
   );
 }
 
+const parseIsoDay = (s) => {
+  if (!s) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(Date.UTC(y, m - 1, d));
+};
+
 export default function Requirements({ active, onNewRequirement }) {
   const { data, error, isLoading, refetch } = useGetRequestTrackQuery({ limit: 500 });
   const [search, setSearch]             = useState('');
@@ -180,6 +182,13 @@ export default function Requirements({ active, onNewRequirement }) {
   const [deliveryF, setDeliveryF]       = useState('');
   const [courseF, setCourseF]           = useState('');
   const [clientF, setClientF]           = useState('');
+  const [typeF, setTypeF]               = useState('');
+  const [fromDate, setFromDate]         = useState('');
+  const [toDate, setToDate]             = useState('');
+  const [page, setPage]                 = useState(1);
+  const [pageSize, setPageSize]         = useState(25);
+  const [sortBy, setSortBy]             = useState(null);   // column key or null
+  const [sortDir, setSortDir]           = useState('asc');  // 'asc' | 'desc'
   const [selected, setSelected]         = useState(null);
 
   const rows = useMemo(() => {
@@ -187,33 +196,8 @@ export default function Requirements({ active, onNewRequirement }) {
     const now = new Date();
     const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
     return raw
-      .map((row) => {
-        const summary = summarise(row);
-        const start = parseSheetDate(row['Program Start Date']);
-        const end   = parseSheetDate(row['Program End Date']);
-        const risk  = deriveRisk(row, summary.gap);
-        const archived = end != null && end.getTime() < todayUtc;
-        return {
-          delivery_id: String(row['Delivery ID'] || '').trim(),
-          client:      String(row['Client Name'] || '').trim(),
-          course:      String(row['Course'] || '').trim(),
-          domain:      String(row['Domain'] || '').trim(),
-          subdomain:   String(row['Subdomain'] || '').trim(),
-          start, end,
-          type:   deriveType(row),
-          status: deriveStatus(row),
-          ta_required: summary.taReq,
-          trainer_required: summary.trainerReq,
-          required: summary.required,
-          int_filled: summary.internal,
-          fl_filled: summary.fl_filled,
-          gap: summary.gap,
-          risk,
-          archived,
-          raw: row, // Save raw record to show detailed information in modal
-        };
-      })
-      .filter((r) => r.delivery_id || r.client || r.course);
+      .map((row) => buildRequirementRow(row, todayUtc))
+      .filter((r) => r && (r.delivery_id || r.client || r.course));
   }, [data]);
 
   const handleRowClick = (row) => {
@@ -238,6 +222,15 @@ export default function Requirements({ active, onNewRequirement }) {
     archived: rows.filter((r) =>  r.archived).length,
   }), [rows]);
 
+  const fromTs = useMemo(() => {
+    const d = parseIsoDay(fromDate);
+    return d ? d.getTime() : null;
+  }, [fromDate]);
+  const toTs = useMemo(() => {
+    const d = parseIsoDay(toDate);
+    return d ? d.getTime() + 86400000 - 1 : null;
+  }, [toDate]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
@@ -245,6 +238,16 @@ export default function Requirements({ active, onNewRequirement }) {
       if (deliveryF && r.delivery_id !== deliveryF) return false;
       if (courseF && r.course !== courseF) return false;
       if (clientF && r.client !== clientF) return false;
+      if (typeF && r.type !== typeF) return false;
+      if (fromTs != null || toTs != null) {
+        const s = r.start ? r.start.getTime() : null;
+        const e = r.end ? r.end.getTime() : s;
+        if (s == null && e == null) return false;
+        const rs = s ?? e;
+        const re = e ?? s;
+        if (fromTs != null && re < fromTs) return false;
+        if (toTs   != null && rs > toTs)   return false;
+      }
       if (!q) return true;
       return (
         r.delivery_id.toLowerCase().includes(q) ||
@@ -254,11 +257,47 @@ export default function Requirements({ active, onNewRequirement }) {
         r.subdomain.toLowerCase().includes(q)
       );
     });
-  }, [rows, search, statusFilter, deliveryF, courseF, clientF]);
+  }, [rows, search, statusFilter, deliveryF, courseF, clientF, typeF, fromTs, toTs]);
 
-  const anyFilter = !!(deliveryF || courseF || clientF || search || statusFilter !== 'ALL');
+  const anyFilter = !!(deliveryF || courseF || clientF || typeF || search || fromDate || toDate || statusFilter !== 'ALL');
   const clearAll = () => {
-    setDeliveryF(''); setCourseF(''); setClientF(''); setSearch(''); setStatusFilter('ALL');
+    setDeliveryF(''); setCourseF(''); setClientF(''); setTypeF(''); setSearch(''); setStatusFilter('ALL');
+    setFromDate(''); setToDate('');
+    setSortBy(null); setSortDir('asc');
+  };
+
+  useEffect(() => { setPage(1); }, [search, statusFilter, deliveryF, courseF, clientF, typeF, fromDate, toDate, pageSize, view]);
+
+  const sorted = useMemo(() => {
+    if (!sortBy) return filtered;
+    const SORT_KEYS = {
+      delivery_id:  (r) => r.delivery_id || '',
+      course:       (r) => (r.course || r.client || '').toLowerCase(),
+      window:       (r) => (r.start ? r.start.getTime() : Number.POSITIVE_INFINITY),
+      type:         (r) => r.type || '',
+      int_free:     (r) => (r.int_filled || 0) * 1000 + (r.fl_filled || 0),
+      trainers:     (r) => r.trainer_required || 0,
+      tas:          (r) => r.ta_required || 0,
+      status:       (r) => r.status || '',
+    };
+    const key = SORT_KEYS[sortBy];
+    if (!key) return filtered;
+    const factor = sortDir === 'desc' ? -1 : 1;
+    return [...filtered].sort((a, b) => {
+      const av = key(a), bv = key(b);
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor;
+      return String(av).localeCompare(String(bv)) * factor;
+    });
+  }, [filtered, sortBy, sortDir]);
+
+  const handleSort = (col) => {
+    if (sortBy !== col) {
+      setSortBy(col); setSortDir('asc');
+    } else if (sortDir === 'asc') {
+      setSortDir('desc');
+    } else {
+      setSortBy(null); setSortDir('asc');
+    }
   };
 
   const handleExport = () => {
@@ -337,28 +376,27 @@ export default function Requirements({ active, onNewRequirement }) {
   }
   if (isLoading && !data) return <LoadingPanel panelId="requirements" active={active} />;
 
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel="requirements">
       <div className="card rq-card">
         <header className="rq-head">
           <div className="rq-head-left">
-            <h2 className="rq-title">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" />
-              </svg>
-              ALL REQUIREMENTS
-            </h2>
+            {view === 'TABLE' && filtered.length > pageSize && (
+              <Pager page={safePage} pageCount={pageCount} onPageChange={setPage} />
+            )}
             <div className="rq-subtitle">
               <strong>{stats.active}</strong> active <span className="rq-dot">·</span> <strong>{stats.archived}</strong> archived
             </div>
           </div>
           <div className="rq-head-right">
             <div className="rq-search-wrap">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input type="search" className="rq-search" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input type="search" className="rq-search" placeholder="Search requirements, delivery IDs, clients…" value={search} onChange={(e) => setSearch(e.target.value)} />
               {search && <button type="button" className="rq-search-clear" onClick={() => setSearch('')} aria-label="Clear">×</button>}
             </div>
             <div className="rq-views" role="tablist">
@@ -373,17 +411,7 @@ export default function Requirements({ active, onNewRequirement }) {
             {onNewRequirement && (
               <button
                 type="button"
-                className="btn-primary"
-                style={{
-                  borderRadius: '100px',
-                  padding: '5px 14px',
-                  height: '30px',
-                  font: '800 10.5px/1 var(--font)',
-                  letterSpacing: '0.04em',
-                  boxShadow: 'none',
-                  animation: 'none',
-                  flexShrink: 0
-                }}
+                className="btn-primary rq-new-btn"
                 onClick={(e) => {
                   e.stopPropagation();
                   onNewRequirement();
@@ -391,13 +419,13 @@ export default function Requirements({ active, onNewRequirement }) {
               >
                 <svg
                   viewBox="0 0 24 24"
-                  width="12"
-                  height="12"
+                  width="14"
+                  height="14"
                   fill="none"
-                  strokeWidth="2.8"
+                  strokeWidth="2.4"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  style={{ marginRight: '4px', stroke: 'currentColor' }}
+                  style={{ marginRight: '6px', stroke: 'currentColor' }}
                 >
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
@@ -408,27 +436,56 @@ export default function Requirements({ active, onNewRequirement }) {
           </div>
         </header>
 
-        {/* ----- Filter bar: searchable dropdowns + status chips ----- */}
+        {/* ----- Filter bar: Filter-By 2x2 (left) · Date Range (mid) · Status (right) ----- */}
         <div className="rq-filters">
-          <SearchSelect label="Delivery ID" value={deliveryF} options={opts.delivery} onChange={setDeliveryF} />
-          <SearchSelect label="Course"      value={courseF}   options={opts.course}   onChange={setCourseF} />
-          <SearchSelect label="Client"      value={clientF}   options={opts.client}   onChange={setClientF} />
-          <div className="rq-status-chips" role="tablist">
-            {STATUS_FILTERS.map((opt) => (
-              <button key={opt} type="button" role="tab" aria-selected={statusFilter === opt}
-                className={`rq-chip${statusFilter === opt ? ' is-active' : ''}`} onClick={() => setStatusFilter(opt)}>
-                {opt}
-              </button>
-            ))}
-          </div>
-          {anyFilter && (
-            <button type="button" className="rq-clear-all" onClick={clearAll}>Clear filters</button>
-          )}
+          <section className="rq-filter-col rq-filter-col-filter">
+            <header className="rq-filter-col-head">
+              <span className="rq-filter-section-label">Filter By</span>
+              {anyFilter && (
+                <button type="button" className="rq-clear-all" onClick={clearAll}>Reset all</button>
+              )}
+            </header>
+            <div className="rq-filter-col-body is-2x2">
+              <SearchSelect label="Delivery ID" value={deliveryF} options={opts.delivery} onChange={setDeliveryF} />
+              <SearchSelect label="Course"      value={courseF}   options={opts.course}   onChange={setCourseF} />
+              <SearchSelect label="Client"      value={clientF}   options={opts.client}   onChange={setClientF} />
+              <SearchSelect label="Type"        value={typeF}     options={TYPE_OPTIONS}  onChange={setTypeF} />
+            </div>
+          </section>
+          <DateRangeColumn
+            start={fromDate}
+            end={toDate}
+            onApply={(s, e) => { setFromDate(s || ''); setToDate(e || ''); }}
+          />
+          <section className="rq-filter-col rq-filter-col-status">
+            <header className="rq-filter-col-head">
+              <span className="rq-filter-section-label">Status</span>
+            </header>
+            <div className="rq-filter-col-body rq-status-chips" role="tablist">
+              {STATUS_FILTERS.map((opt) => (
+                <button key={opt} type="button" role="tab" aria-selected={statusFilter === opt}
+                  className={`rq-chip${statusFilter === opt ? ' is-active' : ''}`} onClick={() => setStatusFilter(opt)}>
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </section>
         </div>
 
         {view === 'TABLE'
-          ? <RequirementsTable rows={filtered} totalRows={rows.length} onRowClick={handleRowClick} />
-          : <GanttChart rows={filtered} onRowClick={handleRowClick} />}
+          ? <RequirementsTable
+              rows={sorted}
+              totalRows={rows.length}
+              onRowClick={handleRowClick}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              onSort={handleSort}
+            />
+          : <GanttChart rows={sorted} onRowClick={handleRowClick} filterFromTs={fromTs} filterToTs={toTs} />}
       </div>
 
       {selected && (
@@ -442,152 +499,134 @@ export default function Requirements({ active, onNewRequirement }) {
   );
 }
 
-/* ----- Requirement detail modal (slide-in panel) ----- */
-const META_KEYS     = ["Delivery ID", "Client Name", "Course", "Domain", "Subdomain", "Allocation Status", "Training Status"];
-const TIMELINE_KEYS = ["Program Start Date", "Program End Date"];
-const REQ_KEYS      = ["Total Trainer Required", "Total TA's Required", "Internal", "Existing Freelancers", "New Freelancers Hired", "New Freelancer Required", "Risk"];
-const PLANNED_KEYS  = ["Trainer planned", "TA Planned"];
+/* RequirementModal + trainer helpers are now imported from components/RequirementModal.jsx
+   so the same drawer renders identically when opened from Calendar/Clients/Matrix. */
 
-function RequirementModal({ row, headers, onClose }) {
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
-  const raw = row.raw || {};
-  const cleanVal = (v) => (v != null && String(v).trim() !== '' ? String(v).trim() : '—');
-  const valFor = (k) => {
-    if (TIMELINE_KEYS.includes(k)) return fmtFull(parseSheetDate(raw[k]));
-    // Any other date-named field: format when it parses, else show the raw text.
-    if (/date/i.test(k)) {
-      const d = parseSheetDate(raw[k]);
-      if (d) return fmtFull(d);
-    }
-    return cleanVal(raw[k]);
-  };
-
-  const pick = (keys) => keys.filter((k) => k in raw).map((k) => ({ k, v: valFor(k) }));
-  const meta     = pick(META_KEYS);
-  const timeline = pick(TIMELINE_KEYS);
-  const req      = pick(REQ_KEYS);
-  const planned  = pick(PLANNED_KEYS);
-
-  const handled = new Set([...META_KEYS, ...TIMELINE_KEYS, ...REQ_KEYS, ...PLANNED_KEYS]);
-  const others = (headers.length ? headers : Object.keys(raw))
-    // Drop the per-day allotment columns (pure-numeric Excel-serial headers) — they're
-    // the day grid, not meaningful record fields, and only clutter the detail view.
-    .filter((h) => h && !h.startsWith('col_') && !/^\d+(\.\d+)?$/.test(h.trim()) && !handled.has(h) && h in raw)
-    .map((k) => ({ k, v: valFor(k) }))
-    .filter(({ v }) => v !== '—');
-
-  const Section = ({ title, items }) => (
-    items.length ? (
-      <div className="oa-det-section">
-        <div className="oa-det-sec-title">{title}</div>
-        <div className="oa-det-grid">
-          {items.map(({ k, v }) => (
-            <div key={k} className="oa-det-contact-row">
-              <span className="oa-det-contact-label">{k}</span>
-              <span className="oa-det-contact-value">{v}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    ) : null
-  );
+/* ----- pagination ----- */
+function Pager({ page, pageCount, onPageChange }) {
+  if (pageCount <= 1) return null;
+  const pages = [];
+  const push = (p) => pages.push(p);
+  const window = 1;
+  const first = 1;
+  const last = pageCount;
+  push(first);
+  const start = Math.max(2, page - window);
+  const end = Math.min(last - 1, page + window);
+  if (start > 2) push('…');
+  for (let i = start; i <= end; i += 1) push(i);
+  if (end < last - 1) push('…');
+  if (last !== first) push(last);
 
   return (
-    <div className="oa-det-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="oa-det-panel" role="dialog" aria-modal="true" aria-label="Requirement detail">
-        <div className="oa-det-head">
-          <div className="oa-det-avatar" style={{ background: 'linear-gradient(135deg,#60a5fa,#2563eb)' }}>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ stroke: '#fff' }}>
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="13" y1="17" x2="8" y2="17" />
-            </svg>
-          </div>
-          <div className="oa-det-info">
-            <div className="oa-det-name">{row.course || row.client || 'Requirement Details'}</div>
-            <div className="oa-det-sub">
-              <span className={`oa-tbl-role oa-role-${row.status === 'OPEN' ? 'ta' : row.status === 'CLOSED' ? 'trainer' : 'bench'}`}>{row.status}</span>
-              <span className={`oa-tbl-pool ${row.type === 'INTERNAL' ? 'oa-pool-int' : row.type === 'FREELANCER' || row.type === 'MIXED' ? 'oa-pool-frl' : 'oa-pool-unassigned'}`}>{row.type}</span>
-              <span className="oa-tbl-avail oa-avail-partial">{windowLabel(row.start, row.end)}</span>
-            </div>
-            {row.delivery_id && <div className="oa-det-id">Delivery ID: {row.delivery_id}</div>}
-          </div>
-          <button type="button" className="oa-det-close" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="oa-det-body">
-          <Section title="General Info" items={meta} />
-          <Section title="Timeline" items={timeline} />
-          <Section title="Staffing &amp; Risk Requirements" items={req} />
-          <Section title="Planned Assignments" items={planned} />
-          <Section title="Additional Data Fields" items={others} />
-        </div>
-      </div>
+    <div className="rq-pager-controls">
+      <button type="button" className="rq-pager-btn" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>‹</button>
+      {pages.map((p, i) =>
+        p === '…'
+          ? <span key={`e${i}`} className="rq-pager-ellipsis">…</span>
+          : <button
+              key={p}
+              type="button"
+              className={`rq-pager-btn${p === page ? ' is-current' : ''}`}
+              onClick={() => onPageChange(p)}
+            >{p}</button>
+      )}
+      <button type="button" className="rq-pager-btn" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>›</button>
     </div>
   );
 }
 
+function SortHeader({ label, sortKey, sortBy, sortDir, onSort, align = 'left' }) {
+  const active = sortBy === sortKey;
+  return (
+    <button
+      type="button"
+      className={`rq-sort${active ? ' is-active' : ''}${align === 'right' ? ' is-right' : ''}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <span>{label}</span>
+      <span className="rq-sort-icon" aria-hidden="true">
+        {active
+          ? (sortDir === 'asc'
+              ? <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 15 12 9 18 15" /></svg>
+              : <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>)
+          : <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}><polyline points="8 9 12 5 16 9" /><polyline points="8 15 12 19 16 15" /></svg>}
+      </span>
+    </button>
+  );
+}
+
 /* ----- table ----- */
-function RequirementsTable({ rows, totalRows, onRowClick }) {
+function RequirementsTable({ rows, totalRows, onRowClick, page, pageSize, onPageChange, onPageSizeChange, sortBy, sortDir, onSort }) {
   if (totalRows === 0) {
     return <div className="rq-empty"><div className="rq-empty-title">No requirements found</div><div className="rq-empty-sub">The Request ID Track sheet returned no rows.</div></div>;
   }
   if (rows.length === 0) {
     return <div className="rq-empty"><div className="rq-empty-title">No matches</div><div className="rq-empty-sub">Nothing matches the current filters.</div></div>;
   }
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const startIdx = (safePage - 1) * pageSize;
+  const visible = rows.slice(startIdx, startIdx + pageSize);
+  const rangeStart = startIdx + 1;
+  const rangeEnd = startIdx + visible.length;
+
   return (
     <div className="rq-table-wrap">
       <table className="rq-table">
         <colgroup>
-          <col style={{ width: '6px' }} />
-          <col style={{ width: '12%' }} />
-          <col style={{ width: '24%' }} />
           <col style={{ width: '13%' }} />
+          <col style={{ width: '26%' }} />
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '11%' }} />
           <col style={{ width: '9%' }} />
-          <col style={{ width: '11%' }} />
           <col style={{ width: '8%' }} />
-          <col style={{ width: '7%' }} />
-          <col style={{ width: '11%' }} />
+          <col style={{ width: '12%' }} />
         </colgroup>
         <thead>
           <tr>
-            <th aria-label="status" />
-            <th>Delivery ID</th>
-            <th>Course / Client</th>
-            <th>Window</th>
-            <th>Type</th>
-            <th className="rq-th-num">INT · FREE</th>
-            <th className="rq-th-num">Trainers</th>
-            <th className="rq-th-num">TAs</th>
-            <th>Status</th>
+            <th><SortHeader label="Delivery ID"   sortKey="delivery_id" sortBy={sortBy} sortDir={sortDir} onSort={onSort} /></th>
+            <th><SortHeader label="Course / Client" sortKey="course"    sortBy={sortBy} sortDir={sortDir} onSort={onSort} /></th>
+            <th><SortHeader label="Window"        sortKey="window"      sortBy={sortBy} sortDir={sortDir} onSort={onSort} /></th>
+            <th><SortHeader label="Type"          sortKey="type"        sortBy={sortBy} sortDir={sortDir} onSort={onSort} /></th>
+            <th className="rq-th-num"><SortHeader label="INT · FREE" sortKey="int_free" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" /></th>
+            <th className="rq-th-num"><SortHeader label="Trainers"   sortKey="trainers" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" /></th>
+            <th className="rq-th-num"><SortHeader label="TAs"        sortKey="tas"      sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" /></th>
+            <th><SortHeader label="Status"        sortKey="status"     sortBy={sortBy} sortDir={sortDir} onSort={onSort} /></th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, idx) => <RequirementsRow key={`${r.delivery_id}-${idx}`} row={r} onRowClick={onRowClick} />)}
+          {visible.map((r, idx) => <RequirementsRow key={`${r.delivery_id}-${startIdx + idx}`} row={r} onRowClick={onRowClick} />)}
         </tbody>
       </table>
-      <div className="rq-table-foot">
-        Showing <strong>{rows.length}</strong> of <strong>{totalRows}</strong> requirement{totalRows === 1 ? '' : 's'}
+      <div className="rq-pager">
+        <div className="rq-pager-info">
+          Showing <strong>{rangeStart}</strong>–<strong>{rangeEnd}</strong> of <strong>{rows.length}</strong>
+          {rows.length !== totalRows && <> filtered from <strong>{totalRows}</strong></>}
+        </div>
+        <Pager page={safePage} pageCount={pageCount} onPageChange={onPageChange} />
+        <label className="rq-pager-size">
+          Rows
+          <select value={pageSize} onChange={(e) => onPageSizeChange(parseInt(e.target.value, 10))}>
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </label>
       </div>
     </div>
   );
 }
 
 function RequirementsRow({ row, onRowClick }) {
-  const tone = riskTone(row.risk);
   const subBits = [row.client, row.domain, row.subdomain].filter(Boolean);
   const subtitle = subBits.join(' · ');
   return (
     <tr className={`rq-row${row.archived ? ' is-archived' : ''} cursor-pointer`} onClick={() => onRowClick(row)}>
-      <td className="rq-cell-bar" aria-hidden="true"><span className={`rq-bar is-${tone}`} /></td>
       <td className="rq-cell-id"><span className="rq-id" title={row.delivery_id || '—'}>{row.delivery_id || '—'}</span></td>
       <td className="rq-cell-cc">
         <div className="rq-cc-title" title={row.course || '—'}>{row.course || row.client || '—'}</div>
@@ -614,10 +653,28 @@ function RequirementsRow({ row, onRowClick }) {
 }
 
 /* ----- Gantt timeline ----- */
-function GanttChart({ rows, onRowClick }) {
-  const dated = useMemo(() => rows.filter((r) => r.start && r.end && r.end >= r.start), [rows]);
+function GanttChart({ rows, onRowClick, filterFromTs, filterToTs }) {
+  const dated = useMemo(() => rows.filter((r) =>
+    r.start && r.end && r.end >= r.start &&
+    // Drop rows with no human label — they render as blank bars that overflow
+    // the viewport without any way to tell what they are.
+    (r.delivery_id || r.course || r.client)
+  ), [rows]);
 
+  // When the user has set a Date Range filter, that range drives the Gantt
+  // domain (so the adaptive granularity reflects what they asked for, not
+  // the full envelope of every matching programme). Otherwise we fall back
+  // to the min/max of the visible rows with a small day of padding.
   const domain = useMemo(() => {
+    if (filterFromTs != null || filterToTs != null) {
+      let min = filterFromTs;
+      let max = filterToTs;
+      if (min == null && dated.length) min = Math.min(...dated.map((r) => r.start.getTime()));
+      if (max == null && dated.length) max = Math.max(...dated.map((r) => r.end.getTime()));
+      if (min == null || max == null) return null;
+      if (max < min) [min, max] = [max, min];
+      return { min, max, span: Math.max(1, max - min) };
+    }
     if (!dated.length) return null;
     let min = dated[0].start.getTime();
     let max = dated[0].end.getTime();
@@ -629,22 +686,72 @@ function GanttChart({ rows, onRowClick }) {
     min -= 2 * 86400000;
     max += 2 * 86400000;
     return { min, max, span: Math.max(1, max - min) };
-  }, [dated]);
+  }, [dated, filterFromTs, filterToTs]);
 
-  // Month gridlines across the domain.
-  const monthMarks = useMemo(() => {
-    if (!domain) return [];
+  // Adaptive timeline — picks a granularity (day/week/month/quarter) so the
+  // axis always reads as ~10 evenly spaced columns regardless of date-range
+  // length. ≤10 days → day, ≤10 weeks → week, ≤10 months → month, beyond → quarter.
+  const { axisMarks, axisGran } = useMemo(() => {
+    if (!domain) return { axisMarks: [], axisGran: 'month' };
+    const DAY = 86400000;
+    const totalDays   = domain.span / DAY;
+    const totalWeeks  = totalDays / 7;
+    const totalMonths = totalDays / 30.4375;
+
+    let gran;
+    if (totalDays   <= 10) gran = 'day';
+    else if (totalWeeks  <= 10) gran = 'week';
+    else if (totalMonths <= 10) gran = 'month';
+    else                        gran = 'quarter';
+
     const marks = [];
-    const d = new Date(domain.min);
-    d.setUTCDate(1);
-    d.setUTCMonth(d.getUTCMonth() + 1);
-    while (d.getTime() <= domain.max) {
-      const pct = ((d.getTime() - domain.min) / domain.span) * 100;
-      marks.push({ pct, label: `${MONTHS_CAP[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}` });
-      d.setUTCMonth(d.getUTCMonth() + 1);
+    const cursor = new Date(domain.min);
+    // Snap cursor to the start of the granularity unit so labels read cleanly.
+    if (gran === 'day') {
+      cursor.setUTCHours(0, 0, 0, 0);
+    } else if (gran === 'week') {
+      cursor.setUTCHours(0, 0, 0, 0);
+      cursor.setUTCDate(cursor.getUTCDate() - cursor.getUTCDay());
+    } else if (gran === 'month') {
+      cursor.setUTCDate(1);
+      cursor.setUTCHours(0, 0, 0, 0);
+    } else {
+      const m = cursor.getUTCMonth();
+      cursor.setUTCDate(1);
+      cursor.setUTCMonth(Math.floor(m / 3) * 3);
+      cursor.setUTCHours(0, 0, 0, 0);
     }
-    return marks;
+
+    const step = () => {
+      if (gran === 'day')   cursor.setUTCDate(cursor.getUTCDate() + 1);
+      if (gran === 'week')  cursor.setUTCDate(cursor.getUTCDate() + 7);
+      if (gran === 'month') cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      if (gran === 'quarter') cursor.setUTCMonth(cursor.getUTCMonth() + 3);
+    };
+
+    const fmtLabel = (d) => {
+      const day = d.getUTCDate();
+      const mon = MONTHS_CAP[d.getUTCMonth()];
+      const yy  = String(d.getUTCFullYear()).slice(2);
+      if (gran === 'day')   return `${day} ${mon}`;
+      if (gran === 'week')  return `${day} ${mon}`;
+      if (gran === 'month') return `${mon} ${yy}`;
+      const q = Math.floor(d.getUTCMonth() / 3) + 1;
+      return `Q${q} ${yy}`;
+    };
+
+    while (cursor.getTime() <= domain.max && marks.length < 24) {
+      const t = cursor.getTime();
+      if (t >= domain.min) {
+        const pct = ((t - domain.min) / domain.span) * 100;
+        marks.push({ pct, label: fmtLabel(cursor) });
+      }
+      step();
+    }
+    return { axisMarks: marks, axisGran: gran };
   }, [domain]);
+  // Kept as alias so the JSX below stays minimal.
+  const monthMarks = axisMarks;
 
   const todayPct = useMemo(() => {
     if (!domain) return null;
@@ -686,8 +793,13 @@ function GanttChart({ rows, onRowClick }) {
           {/* rows */}
           <div className="rq-gantt-rows">
             {sorted.map((r, idx) => {
-              const left = ((r.start.getTime() - domain.min) / domain.span) * 100;
-              const width = Math.max(1.2, ((r.end.getTime() - r.start.getTime()) / domain.span) * 100);
+              // Clamp to [0,100]% so bars whose window extends past the
+              // visible range don't overflow the track.
+              const rawLeft  = ((r.start.getTime() - domain.min) / domain.span) * 100;
+              const rawRight = ((r.end.getTime()   - domain.min) / domain.span) * 100;
+              const left  = Math.max(0,   Math.min(100, rawLeft));
+              const right = Math.max(0,   Math.min(100, rawRight));
+              const width = Math.max(1.2, right - left);
               const tone = STATUS_TONE[r.status] || 'open';
               return (
                 <div key={`${r.delivery_id}-${idx}`} className="rq-gantt-row">
