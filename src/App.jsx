@@ -7,6 +7,7 @@ import StatusBar from './components/StatusBar.jsx';
 import CmdK from './components/CmdK.jsx';
 import Modal from './components/Modal.jsx';
 import ToastStack from './components/ToastStack.jsx';
+import Notify from './components/Notify.jsx';
 import Popover from './components/Popover.jsx';
 import NewRequirementSimulator from './components/NewRequirementSimulator.jsx';
 
@@ -163,6 +164,7 @@ export default function App() {
       <>
         <Login onLoginSuccess={(tok, usr) => { setToken(tok); setUser(usr); }} />
         <ToastStack />
+        <Notify />
       </>
     );
   }
@@ -191,6 +193,7 @@ export default function App() {
       </div>
       <StatusBar />
       <ToastStack />
+      <Notify />
       <Modal />
       <Popover />
       <NewRequirementSimulator open={simOpen} onClose={() => setSimOpen(false)} />
