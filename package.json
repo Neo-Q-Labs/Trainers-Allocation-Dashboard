@@ -1,9 +1,9 @@
 {
-  "name": "qlabs-capacity-planner",
+  "name": "qlabs-allocation-dashboard",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "QLabs Swift Ops · Trainer Capacity Planner (React 19 · Vite · Tailwind 4)",
+  "description": "QLabs Swift Ops · Trainer Allocation Dashboard (React 19 · Vite · Tailwind 4)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
