@@ -11584,3 +11584,155 @@ html, body {
   .gc-cell { min-height: 56px; }
   .gc-day-item-grid { grid-template-columns: 1fr; }
 }
+/* ================================================================
+   CONFLICTS — Detail Drawer & enriched cards (added this session)
+   ================================================================ */
+
+/* Clickable card affordance */
+.conflict-card.cf-clickable { cursor: pointer; }
+.conflict-card.cf-clickable:hover { transform: translateY(-1px); box-shadow: 0 4px 24px rgba(0,0,0,0.35); }
+.cc-head-right { display: flex; align-items: center; gap: 8px; }
+.cf-card-arrow { opacity: 0.4; transition: opacity .15s, transform .15s; }
+.conflict-card.cf-clickable:hover .cf-card-arrow { opacity: 0.8; transform: translateX(3px); }
+.cf-client-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 10px; font-weight: 600; background: rgba(99,102,241,.18);
+  color: var(--accent); letter-spacing: .4px;
+}
+.cf-card-hint {
+  display: flex; align-items: center; gap: 5px; font-size: 11px;
+  color: var(--text-muted); margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.05); opacity: 0.7;
+}
+.cf-card-hint svg { opacity: 0.6; }
+
+/* ---- Drawer overlay ---- */
+.cf-drawer-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.52);
+  backdrop-filter: blur(2px); z-index: 200; animation: cf-fade-in .18s ease;
+}
+@keyframes cf-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---- Drawer panel ---- */
+.cf-drawer {
+  position: fixed; top: 0; right: 0; width: 500px; max-width: 96vw;
+  height: 100dvh; background: var(--panel-bg, #16192A);
+  border-left: 1px solid rgba(255,255,255,.08);
+  box-shadow: -8px 0 40px rgba(0,0,0,.5); z-index: 201;
+  display: flex; flex-direction: column; overflow-y: auto;
+  animation: cf-slide-in .22s cubic-bezier(.25,.46,.45,.94);
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.1) transparent;
+}
+@keyframes cf-slide-in {
+  from { transform: translateX(100%); opacity: .6; }
+  to   { transform: translateX(0);    opacity: 1;  }
+}
+
+/* ---- Drawer header ---- */
+.cf-dh-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 22px 20px 18px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.02); flex-shrink: 0;
+}
+.cf-dh-trainer { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.cf-dh-avatar  { width: 44px !important; height: 44px !important; font-size: 16px !important; flex-shrink: 0; }
+.cf-dh-name    { font-size: 16px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+.cf-dh-meta    { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.cf-dh-right   { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.cf-dh-close {
+  background: rgba(255,255,255,.06); border: none; border-radius: 8px;
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-secondary); transition: background .15s, color .15s;
+}
+.cf-dh-close:hover { background: rgba(239,68,68,.18); color: #ef4444; }
+.cf-dh-close svg   { stroke: currentColor; }
+
+/* ---- Section labels ---- */
+.cf-section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--text-muted); padding: 18px 20px 8px;
+}
+
+/* ---- Why box ---- */
+.cf-why-box {
+  margin: 14px 20px 0; padding: 14px 16px; border-radius: 10px;
+  background: rgba(239,68,68,.07); border: 1px solid rgba(239,68,68,.2);
+}
+.cf-why-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700; color: #ef4444; margin-bottom: 8px;
+}
+.cf-why-title svg { stroke: #ef4444; flex-shrink: 0; }
+.cf-why-body { font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+.cf-why-body strong { color: var(--text-primary); }
+
+/* ---- Delivery legs grid ---- */
+.cf-dleg-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 0 20px 4px; }
+.cf-dleg-card {
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+  border-top: 3px solid var(--leg-accent, var(--accent));
+  border-radius: 10px; padding: 12px; min-width: 0;
+}
+.cf-dleg-num { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--leg-accent, var(--accent)); margin-bottom: 6px; }
+.cf-dleg-course {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  line-height: 1.3; margin-bottom: 8px; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.cf-dleg-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.cf-dleg-tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; letter-spacing: .3px; }
+.cf-dleg-tag.client { background: rgba(99,102,241,.2); color: #818cf8; }
+.cf-dleg-tag.cat    { background: rgba(255,255,255,.06); color: var(--text-muted); }
+.cf-dleg-details { display: flex; flex-direction: column; gap: 5px; }
+.cf-dleg-row { display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.35; }
+.cf-dleg-row svg { stroke: var(--text-muted); flex-shrink: 0; margin-top: 1px; }
+.cf-dleg-id { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--text-muted); }
+
+/* ---- Overlap visualisation ---- */
+.cf-overlap-viz { margin: 0 20px; padding: 14px 12px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); border-radius: 10px; }
+.cf-overlap-range { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 10px; }
+.cf-overlap-track { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.cf-overlap-track:last-child { margin-bottom: 0; }
+.cf-overlap-label { font-size: 10px; font-weight: 700; letter-spacing: .5px; color: var(--text-muted); width: 20px; flex-shrink: 0; text-align: right; }
+.cf-overlap-rail { position: relative; flex: 1; height: 22px; background: rgba(255,255,255,.04); border-radius: 4px; overflow: visible; }
+.cf-overlap-bar { position: absolute; top: 3px; height: 16px; border-radius: 4px; opacity: .75; transition: opacity .2s; }
+.cf-overlap-bar:hover { opacity: 1; }
+.cf-overlap-marker { position: absolute; top: -4px; transform: translateX(-50%); z-index: 2; }
+.cf-overlap-marker-line { width: 2px; height: 30px; background: #ef4444; border-radius: 2px; margin: 0 auto; box-shadow: 0 0 6px rgba(239,68,68,.6); }
+.cf-overlap-marker-label { position: absolute; top: 32px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #ef4444; white-space: nowrap; font-weight: 600; letter-spacing: .3px; }
+.cf-overlap-note { margin-top: 8px; font-size: 10px; color: var(--text-muted); opacity: 0.7; text-align: center; }
+
+/* ---- Suggestion ---- */
+.cf-suggestion-box {
+  margin: 14px 20px 0; padding: 12px 14px; border-radius: 10px;
+  background: rgba(34,211,165,.06); border: 1px solid rgba(34,211,165,.15);
+  display: flex; gap: 10px; align-items: flex-start;
+  font-size: 12.5px; color: var(--text-secondary); line-height: 1.5;
+}
+.cf-suggestion-box strong { color: var(--text-primary); }
+
+/* ---- Drawer action rows ---- */
+.cf-daction-row {
+  display: flex; gap: 10px; padding: 16px 20px 24px;
+  margin-top: auto; border-top: 1px solid rgba(255,255,255,.06); flex-shrink: 0;
+}
+.cf-daction-row .cc-btn { flex: 1; justify-content: center; }
+.cf-daction-handled {
+  display: flex; align-items: center; gap: 10px; padding: 16px 20px 24px;
+  margin-top: auto; border-top: 1px solid rgba(255,255,255,.06);
+  font-size: 12.5px; color: var(--text-secondary); flex-shrink: 0;
+}
+
+/* cf-dleg field label (Location/Track, Training window, etc.) */
+.cf-dleg-field-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  opacity: 0.7;
+}
+.cf-dleg-conflict-date { margin-top: 2px; }
