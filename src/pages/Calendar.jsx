@@ -3,8 +3,11 @@ import {
   useGetCalendarDataQuery,
   useGetCalendarGanttQuery,
   useGetDeliveriesQuery,
+  useGetRequestTrackQuery,
 } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
+import RequirementModal from '../components/RequirementModal.jsx';
+import { buildRequirementRow, findRawByDeliveryId } from '../lib/req.js';
 import { exportToExcel } from '../lib/exportExcel.js';
 
 /* ============================================================
@@ -49,6 +52,22 @@ const clientColor = (c) => CLIENT_META[c]?.color || CLIENT_META.other.color;
 const clientLabel = (c) => CLIENT_META[c]?.label || (c ? c.toUpperCase() : 'Other');
 const trackLabel  = (t) => TRACK_LABEL[t] || (t ? t.toUpperCase() : 'Other');
 
+/* Classify a trainer name by pool. Backend doesn't tag the per-day event
+   with a pool, so we fall back to heuristics on the trainer string and on
+   any pool hint we can pull from the joined delivery record. */
+function classifyPool(name = '', deliveryHint = null) {
+  const s = String(name).toLowerCase();
+  if (/wilp/.test(s)) return 'WILP';
+  if (/freelanc|frl|external/.test(s)) return 'FREELANCER';
+  if (/internal|\bint\b/.test(s)) return 'INTERNAL';
+  if (deliveryHint) {
+    const ds = String(deliveryHint).toLowerCase();
+    if (/wilp/.test(ds)) return 'WILP';
+    if (/freelanc|frl|external/.test(ds)) return 'FREELANCER';
+  }
+  return 'INTERNAL';
+}
+
 // Local YYYY-MM-DD key (matches backend's local-date keys).
 const isoKey = (d) => {
   const y = d.getFullYear();
@@ -87,6 +106,8 @@ export default function Calendar({ active }) {
   // 'all' = show every programme active on the day (month / quarter / year)
   // 'starting' = show only programmes whose delivery starts on that day (week view)
   const [modalMode, setModalMode] = useState('all');
+  // Programme drilled in via DayDetailModal → opens the shared RequirementModal.
+  const [pickedReq, setPickedReq] = useState(null);
 
   const cursorYear = cursor.getFullYear();
 
@@ -107,6 +128,25 @@ export default function Calendar({ active }) {
     (deliveriesData?.deliveries || []).forEach((d) => { if (d.delivery_id) m.set(d.delivery_id, d); });
     return m;
   }, [deliveriesData]);
+
+  // Used by the day modal so clicking a programme can open the same drawer
+  // the Requirements page uses.
+  const { data: rtRes } = useGetRequestTrackQuery({ limit: 500 });
+  const rtRows = rtRes?.rows || [];
+  const rtHeaders = rtRes?.headers || [];
+
+  const openProgramme = useCallback((deliveryId) => {
+    if (!deliveryId) {
+      window.notify?.('Programme details unavailable', 'No Delivery ID is attached to this entry.', 'warn');
+      return;
+    }
+    const raw = findRawByDeliveryId(rtRows, deliveryId);
+    if (!raw) {
+      window.notify?.('Programme not found', `No request-track row matches "${deliveryId}". The data may not have synced yet.`, 'warn');
+      return;
+    }
+    setPickedReq(buildRequirementRow(raw));
+  }, [rtRows]);
 
   const error = yearErr || ganttErr;
 
@@ -152,7 +192,22 @@ export default function Calendar({ active }) {
     }
     const programmes = [...map.values()].map((g) => ({ ...g, trainers: [...g.trainers] }));
     const trainerCount = new Set(filtered.map((e) => e.trainer)).size;
-    return { programmes, assignments: filtered.length, trainerCount };
+    // Pool split per the user spec: Internal + WILP grouped left, Freelancer on the right.
+    const seenTrainers = new Set();
+    let intCount = 0, wilpCount = 0, frlCount = 0;
+    for (const e of filtered) {
+      if (seenTrainers.has(e.trainer)) continue;
+      seenTrainers.add(e.trainer);
+      const pool = classifyPool(e.trainer, e.name);
+      if (pool === 'WILP') wilpCount += 1;
+      else if (pool === 'FREELANCER') frlCount += 1;
+      else intCount += 1;
+    }
+    return {
+      programmes, assignments: filtered.length, trainerCount,
+      intCount, wilpCount, frlCount,
+      ownedCount: intCount + wilpCount,
+    };
   }, [calendarData, trackF, clientF]);
 
   // Month / quarter / year click → show all active programmes for that date
@@ -318,7 +373,16 @@ export default function Calendar({ active }) {
           data={modalMode === 'starting' ? dayDataStarting(modalDate) : dayData(modalDate)}
           deliveryById={deliveryById}
           scopeNote={modalMode === 'starting' ? 'Programmes starting on this date' : null}
+          onPickProgramme={openProgramme}
           onClose={() => setModalDate(null)}
+        />
+      )}
+
+      {pickedReq && (
+        <RequirementModal
+          row={pickedReq}
+          headers={rtHeaders}
+          onClose={() => setPickedReq(null)}
         />
       )}
     </section>
@@ -358,11 +422,10 @@ function MonthView({ cursor, dayData, onDay }) {
       ))}
       {cells.map((d, i) => {
         const iso = isoKey(d);
-        const { programmes, trainerCount } = dayData(iso);
+        const { programmes, trainerCount, ownedCount, frlCount } = dayData(iso);
         const inMonth = d.getMonth() === cursor.getMonth();
         const isToday = sameDate(d, TODAY);
         const we = d.getDay() === 0 || d.getDay() === 6;
-        // Unique clients for the coloured-dot strip (up to 5)
         const uniqueClients = [...new Set(programmes.map((p) => p.client))].slice(0, 5);
         return (
           <div key={i}
@@ -372,13 +435,17 @@ function MonthView({ cursor, dayData, onDay }) {
             <div className="gc-cell-events">
               {programmes.length > 0 && (
                 <div className="gc-cell-summary"
-                  title={`${programmes.length} active programme(s) · ${trainerCount} trainer(s)`}>
-                  <span className="gc-count-num">{programmes.length}</span>
-                  <span className="gc-count-lbl">active</span>
+                  title={`${programmes.length} programme(s) · ${trainerCount} trainer(s) · ${ownedCount} INT+WILP : ${frlCount} FRL`}>
+                  <span className="gc-cell-split">
+                    <span className="gc-cell-split-int">{ownedCount}</span>
+                    <span className="gc-cell-split-sep">:</span>
+                    <span className="gc-cell-split-frl">{frlCount}</span>
+                  </span>
                   <div className="gc-count-dots">
                     {uniqueClients.map((c, ci) => (
                       <span key={ci} className="gc-count-dot" style={{ background: clientColor(c) }} />
                     ))}
+                    <span className="gc-count-after">· {programmes.length}</span>
                   </div>
                 </div>
               )}
@@ -615,35 +682,59 @@ function SearchSelect({ label, value, options, onChange }) {
 /* ============================================================
    Day detail modal — all programmes for the clicked date
    ============================================================ */
-function DayDetailModal({ iso, data, deliveryById, scopeNote, onClose }) {
+function DayDetailModal({ iso, data, deliveryById, scopeNote, onPickProgramme, onClose }) {
+  const [search, setSearch] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const { programmes, assignments, trainerCount } = data;
+  const { programmes, assignments, trainerCount, ownedCount, frlCount } = data;
   const dateObj = new Date(iso);
   const niceDate = dateObj.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
+  const clientOptions = useMemo(() => {
+    const set = new Set();
+    programmes.forEach((p) => { if (p.client) set.add(p.client); });
+    return Array.from(set).sort();
+  }, [programmes]);
+
+  const q = search.trim().toLowerCase();
+  const visible = programmes.filter((p) => {
+    if (clientFilter && p.client !== clientFilter) return false;
+    if (!q) return true;
+    const trainerBag = Array.isArray(p.trainers) ? p.trainers.join(' ') : '';
+    return [p.name, p.delivery_id, p.campus, clientLabel(p.client), trackLabel(p.track), trainerBag]
+      .some((v) => String(v || '').toLowerCase().includes(q));
+  });
+
   return (
     <div className="oa-det-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="oa-det-panel" role="dialog" aria-modal="true" aria-label={`Programmes on ${niceDate}`}>
-        <div className="oa-det-head">
-          <div className="oa-det-avatar" style={{ background: 'linear-gradient(135deg,#06b6d4,#3b82f6)' }}>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ stroke: '#fff' }}>
+      <div className="oa-det-panel is-wide" role="dialog" aria-modal="true" aria-label={`Programmes on ${niceDate}`}>
+        <div className="oa-det-head rqd-head">
+          <div className="oa-det-avatar rqd-head-avatar" style={{ background: 'linear-gradient(135deg,var(--accent),var(--accent2))' }}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ stroke: '#fff' }}>
               <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
             </svg>
           </div>
-          <div className="oa-det-info">
-            <div className="oa-det-name">{niceDate}</div>
-            {scopeNote && (
-              <div className="gc-modal-scope">{scopeNote}</div>
-            )}
-            <div className="oa-det-sub">
-              <span className="oa-tbl-avail oa-avail-full">{programmes.length} programme{programmes.length === 1 ? '' : 's'}</span>
-              <span className="oa-tbl-pool oa-pool-int">{trainerCount} trainer{trainerCount === 1 ? '' : 's'}</span>
-              <span className="oa-tbl-pool oa-pool-frl">{assignments} assignment{assignments === 1 ? '' : 's'}</span>
+          <div className="rqd-head-info">
+            <div className="rqd-head-title-row">
+              <span className="rqd-head-title">{niceDate}</span>
+              <span className="rqd-head-sep">|</span>
+              <span className="rqd-head-window">{programmes.length} programme{programmes.length === 1 ? '' : 's'}</span>
+              <span className="rqd-head-sep">|</span>
+              <span className="rqd-head-window">{trainerCount} trainer{trainerCount === 1 ? '' : 's'}</span>
+              <span className="rqd-head-sep">|</span>
+              <span className="rqd-head-window">
+                <span style={{ color: 'var(--accent-text)' }}>{ownedCount}</span>
+                <span style={{ color: 'var(--text-muted)' }}> INT+WILP · </span>
+                <span style={{ color: 'var(--neon-yellow)' }}>{frlCount}</span>
+                <span style={{ color: 'var(--text-muted)' }}> FRL</span>
+              </span>
+              {scopeNote && <span className="gc-modal-scope">{scopeNote}</span>}
             </div>
           </div>
           <button type="button" className="oa-det-close" onClick={onClose} aria-label="Close">
@@ -651,49 +742,90 @@ function DayDetailModal({ iso, data, deliveryById, scopeNote, onClose }) {
           </button>
         </div>
 
-        <div className="oa-det-body">
-          {programmes.length === 0 ? (
-            <div className="gc-day-empty">No programmes scheduled for this date (with the current filters).</div>
-          ) : (
-            <div className="gc-day-list">
-              {programmes.map((p, i) => {
-                const del = deliveryById.get(p.delivery_id);
-                const dayTrainers = p.trainers || [];
-                return (
-                  <div key={i} className="gc-day-item" style={{ '--c': clientColor(p.client) }}>
-                    <div className="gc-day-item-bar" />
-                    <div className="gc-day-item-body">
-                      <div className="gc-day-item-title">{p.name || '—'}</div>
-                      <div className="gc-day-item-chips">
-                        <span className="gc-tag" style={{ color: clientColor(p.client), borderColor: clientColor(p.client) + '55' }}>{clientLabel(p.client)}</span>
-                        <span className="gc-tag gc-tag-track">{trackLabel(p.track)}</span>
-                        {p.delivery_id && <span className="gc-tag gc-tag-id">{p.delivery_id}</span>}
-                        {del?.status && <span className="gc-tag gc-tag-status">{del.status}</span>}
-                      </div>
-                      <div className="gc-day-item-grid">
-                        <Field label="Trainers on day" value={dayTrainers.length || 'Unassigned'} />
-                        <Field label="Campus" value={p.campus || del?.campus || '—'} />
-                        {del && <Field label="Window" value={`${fmtFullDate(del.start_date)} → ${fmtFullDate(del.end_date)}`} />}
-                        {del && (del.filled_slots != null || del.total_slots != null) && (
-                          <Field label="Slots filled" value={`${del.filled_slots ?? 0} / ${del.total_slots ?? 0}`} />
-                        )}
-                        {del?.ta_count != null && <Field label="TAs" value={del.ta_count} />}
-                        {del?.risk_level && <Field label="Risk" value={del.risk_level} />}
-                      </div>
-                      {dayTrainers.length > 0 && (
-                        <div className="gc-day-trainers">
-                          {dayTrainers.slice(0, 16).map((t, ti) => (
-                            <span key={`${t}-${ti}`} className="gc-trainer-chip">{t}</span>
-                          ))}
-                          {dayTrainers.length > 16 && <span className="gc-trainer-more">+{dayTrainers.length - 16}</span>}
-                        </div>
-                      )}
-                    </div>
+        <div className="rqd-body" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+          <div className="rqd-main">
+            <div className="rqd-section">
+              <div className="rqd-section-head">
+                <div className="rqd-section-title">Programmes</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div className="rqd-search" style={{ width: 260 }}>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input
+                      type="search"
+                      placeholder="Search programmes, delivery IDs, trainers…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
                   </div>
-                );
-              })}
+                  <select
+                    value={clientFilter}
+                    onChange={(e) => setClientFilter(e.target.value)}
+                    className="gc-day-client-select"
+                  >
+                    <option value="">All clients</option>
+                    {clientOptions.map((c) => (
+                      <option key={c} value={c}>{clientLabel(c)}</option>
+                    ))}
+                  </select>
+                  <div className="rqd-section-count">{visible.length}/{programmes.length}</div>
+                </div>
+              </div>
+
+              {visible.length === 0 ? (
+                <div className="rqd-empty">
+                  {programmes.length ? 'No matches for that search.' : 'No programmes scheduled for this date.'}
+                </div>
+              ) : (
+                <div className="gc-day-list">
+                  {visible.map((p, i) => {
+                    const del = deliveryById.get(p.delivery_id);
+                    const dayTrainers = p.trainers || [];
+                    const canDrill = !!(p.delivery_id && onPickProgramme);
+                    return (
+                      <div
+                        key={i}
+                        className={`gc-day-item${canDrill ? ' is-clickable' : ''}`}
+                        style={{ '--c': clientColor(p.client) }}
+                        onClick={() => canDrill && onPickProgramme(p.delivery_id)}
+                        role={canDrill ? 'button' : undefined}
+                        tabIndex={canDrill ? 0 : undefined}
+                      >
+                        <div className="gc-day-item-body">
+                          <div className="gc-day-item-title">{p.name || '—'}</div>
+                          <div className="gc-day-item-chips">
+                            <span className="gc-tag" style={{ color: clientColor(p.client), borderColor: clientColor(p.client) + '55' }}>{clientLabel(p.client)}</span>
+                            <span className="gc-tag gc-tag-track">{trackLabel(p.track)}</span>
+                            {p.delivery_id && <span className="gc-tag gc-tag-id">{p.delivery_id}</span>}
+                            {del?.status && <span className="gc-tag gc-tag-status">{del.status}</span>}
+                          </div>
+                          <div className="gc-day-item-grid">
+                            <Field label="Trainers on day" value={dayTrainers.length || 'Unassigned'} />
+                            <Field label="Campus" value={p.campus || del?.campus || '—'} />
+                            {del && <Field label="Window" value={`${fmtFullDate(del.start_date)} → ${fmtFullDate(del.end_date)}`} />}
+                            {del && (del.filled_slots != null || del.total_slots != null) && (
+                              <Field label="Slots filled" value={`${del.filled_slots ?? 0} / ${del.total_slots ?? 0}`} />
+                            )}
+                            {del?.ta_count != null && <Field label="TAs" value={del.ta_count} />}
+                            {del?.risk_level && <Field label="Risk" value={del.risk_level} />}
+                          </div>
+                          {dayTrainers.length > 0 && (
+                            <div className="gc-day-trainers">
+                              {dayTrainers.slice(0, 16).map((t, ti) => (
+                                <span key={`${t}-${ti}`} className="gc-trainer-chip">{t}</span>
+                              ))}
+                              {dayTrainers.length > 16 && <span className="gc-trainer-more">+{dayTrainers.length - 16}</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
