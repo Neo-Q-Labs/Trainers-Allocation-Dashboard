@@ -1,26 +1,21 @@
 import { useMemo, useState } from 'react';
 
 /* ============================================================
-   DemandCapacityChart — Hero analytical chart (compact rebuild)
+   DemandCapacityChart — smooth stacked-area capacity timeline
    ------------------------------------------------------------
-   Stacked bars per day (Internal · Freelancer · TA) overlaid
-   with a smooth available-capacity line. Data shape from
-   /api/v1/kpis → demand_vs_capacity[] :
-     { date, d, m, i, f, t, capI, capF }
+   Replaces the previous stacked-bar approach with a flowing,
+   layered area chart. Three series (Internal · Freelancer · TA)
+   are rendered as smoothed cubic areas, stacked from bottom to
+   top, with a high-contrast capacity line floating above.
 
-   Compared to the first cut:
-     • Shorter chart (220px vs 360px) to reclaim vertical space
-     • Persistent readout strip below the chart (no floating
-       tooltip that disappears under other elements)
-     • X-axis shows "1 Jun" instead of bare day numbers + month
-       only on month boundaries — much more scannable
-     • Click a day → bubbles up via onPickDay
+   Data shape (unchanged):
+     { date, d, m, i, f, t, capI, capF }
    ============================================================ */
 
 const COLORS = {
   internal:   '#22D3A5',
-  freelancer: '#A855F7',
-  ta:         '#06B6D4',
+  freelancer: '#0325BD',
+  ta:         '#9AA0BC',
   capacity:   '#EF4444',
 };
 
@@ -36,55 +31,81 @@ const labelForDate = (iso, prevIso) => {
   return prevMonth !== m ? `${d} ${monthName}` : `${d}`;
 };
 
+/* Smooth cubic path through a list of [x, y] points. */
+function smoothPath(pts) {
+  if (!pts.length) return '';
+  let p = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1];
+    const [x1, y1] = pts[i];
+    const cx = (x0 + x1) / 2;
+    p += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`;
+  }
+  return p;
+}
+
+/* Build a stacked area for one series given a baseline + top values. */
+function stackedAreaPath(xs, topVals, baseVals) {
+  if (!xs.length) return '';
+  const top = xs.map((x, i) => [x, topVals[i]]);
+  const bot = xs.map((x, i) => [x, baseVals[i]]).reverse();
+  const topPath = smoothPath(top);
+  const botPath = smoothPath(bot).replace(/^M/, 'L');
+  return `${topPath} ${botPath} Z`;
+}
+
 export default function DemandCapacityChart({ data = [], onPickDay }) {
   const [hover, setHover] = useState(null);
 
   const W = 980;
-  const H = 220;
-  const PAD = { l: 34, r: 14, t: 18, b: 28 };
+  const H = 240;
+  const PAD = { l: 36, r: 14, t: 22, b: 30 };
   const innerW = W - PAD.l - PAD.r;
   const innerH = H - PAD.t - PAD.b;
 
-  const series = useMemo(() => {
-    return (data || []).map((d) => ({
-      ...d,
-      total: (d.i || 0) + (d.f || 0) + (d.t || 0),
-      cap:   (d.capI || 0) + (d.capF || 0),
-    }));
-  }, [data]);
+  const series = useMemo(() => (data || []).map((d) => ({
+    ...d,
+    total: (d.i || 0) + (d.f || 0) + (d.t || 0),
+    cap:   (d.capI || 0) + (d.capF || 0),
+  })), [data]);
 
   if (!series.length) {
     return <div className="dash-chart-empty">Capacity timeline data unavailable.</div>;
   }
 
   const maxY = Math.max(1, ...series.map((d) => Math.max(d.total, d.cap)));
-  const step = innerW / series.length;
-  const barW = Math.max(8, step * 0.62);
+  const step = innerW / Math.max(1, series.length - 1);
+  const xFor = (i) => PAD.l + i * step;
   const yFor = (v) => PAD.t + innerH - (v / maxY) * innerH;
-  const xFor = (i) => PAD.l + i * step + step / 2;
 
-  // Capacity line — smooth cubic curve.
-  const linePts = series.map((d, i) => [xFor(i), yFor(d.cap)]);
-  const linePath = (() => {
-    if (linePts.length === 0) return '';
-    let p = `M${linePts[0][0]},${linePts[0][1]}`;
-    for (let i = 1; i < linePts.length; i++) {
-      const [x0, y0] = linePts[i - 1];
-      const [x1, y1] = linePts[i];
-      const cx = (x0 + x1) / 2;
-      p += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`;
-    }
-    return p;
-  })();
+  // Stacked baselines (cumulative).
+  const xs       = series.map((_, i) => xFor(i));
+  const baseI    = series.map(() => 0);
+  const topI     = series.map((d) => d.i || 0);
+  const baseF    = series.map((d) => d.i || 0);
+  const topF     = series.map((d) => (d.i || 0) + (d.f || 0));
+  const baseT    = series.map((d) => (d.i || 0) + (d.f || 0));
+  const topT     = series.map((d) => (d.i || 0) + (d.f || 0) + (d.t || 0));
 
-  // Y-axis ticks (0 / mid / max)
+  const yArrI = topI.map(yFor);
+  const yArrF = topF.map(yFor);
+  const yArrT = topT.map(yFor);
+  const yArrBaseline = baseI.map(yFor);
+
+  const areaI = stackedAreaPath(xs, yArrI, yArrBaseline);
+  const areaF = stackedAreaPath(xs, yArrF, yArrI);
+  const areaT = stackedAreaPath(xs, yArrT, yArrF);
+
+  // Capacity line.
+  const capPath = smoothPath(series.map((d, i) => [xFor(i), yFor(d.cap)]));
+
+  // Y-axis ticks (0 / mid / max).
   const ticks = [0, 0.5, 1].map((f) => ({
     y: PAD.t + innerH * (1 - f),
     v: Math.round(maxY * f),
   }));
 
-  // X-axis labels — pick ~6 evenly spaced points + always include the first
-  // day of any month. Keeps the axis scannable without overlap.
+  // X-axis labels — ~6 evenly spaced + every month boundary.
   const labelIndexes = useMemo(() => {
     const set = new Set();
     const idealCount = 8;
@@ -118,31 +139,42 @@ export default function DemandCapacityChart({ data = [], onPickDay }) {
       </div>
 
       <svg viewBox={`0 0 ${W} ${H}`} className="dash-chart-svg" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="dch-grad-i" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={COLORS.internal} stopOpacity="0.55" />
+            <stop offset="100%" stopColor={COLORS.internal} stopOpacity="0.05" />
+          </linearGradient>
+          <linearGradient id="dch-grad-f" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={COLORS.freelancer} stopOpacity="0.55" />
+            <stop offset="100%" stopColor={COLORS.freelancer} stopOpacity="0.05" />
+          </linearGradient>
+          <linearGradient id="dch-grad-t" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={COLORS.ta} stopOpacity="0.45" />
+            <stop offset="100%" stopColor={COLORS.ta} stopOpacity="0.04" />
+          </linearGradient>
+        </defs>
+
         {/* gridlines + y labels */}
         {ticks.map((t, i) => (
           <g key={`t${i}`}>
             <line x1={PAD.l} x2={W - PAD.r} y1={t.y} y2={t.y} stroke="rgba(255,255,255,0.05)" strokeDasharray="2 4" />
-            <text x={PAD.l - 6} y={t.y + 3} fill="rgba(154,160,188,0.75)" fontSize="9" textAnchor="end" fontFamily="JetBrains Mono, monospace">{t.v}</text>
+            <text x={PAD.l - 8} y={t.y + 3} fill="rgba(154,160,188,0.75)" fontSize="9.5" textAnchor="end" fontFamily="JetBrains Mono, monospace">{t.v}</text>
           </g>
         ))}
 
-        {/* stacked bars + hit bands */}
-        {series.map((d, i) => {
-          const cx = xFor(i);
-          const x = cx - barW / 2;
-          let cursorY = PAD.t + innerH;
-          const segs = [];
-          const layer = (val, color, key) => {
-            if (!val) return;
-            const h = (val / maxY) * innerH;
-            cursorY -= h;
-            segs.push({ x, y: cursorY, w: barW, h, color, key });
-          };
-          layer(d.i, COLORS.internal, 'i');
-          layer(d.f, COLORS.freelancer, 'f');
-          layer(d.t, COLORS.ta, 't');
-          const isHover = hover === i;
+        {/* stacked areas (bottom up) */}
+        <path d={areaI} fill="url(#dch-grad-i)" stroke={COLORS.internal}   strokeWidth="1.4" strokeOpacity="0.9" />
+        <path d={areaF} fill="url(#dch-grad-f)" stroke={COLORS.freelancer} strokeWidth="1.4" strokeOpacity="0.9" />
+        <path d={areaT} fill="url(#dch-grad-t)" stroke={COLORS.ta}         strokeWidth="1.4" strokeOpacity="0.9" />
 
+        {/* capacity line */}
+        <path d={capPath} fill="none" stroke={COLORS.capacity} strokeWidth="2" strokeLinecap="round" strokeDasharray="6 4" opacity="0.85" />
+
+        {/* hover bands — full-height transparent rect per index */}
+        {series.map((d, i) => {
+          const bandX = i === 0 ? PAD.l : (xs[i] + xs[i - 1]) / 2;
+          const bandRight = i === series.length - 1 ? W - PAD.r : (xs[i] + xs[i + 1]) / 2;
+          const isHover = hover === i;
           return (
             <g
               key={d.date}
@@ -151,30 +183,28 @@ export default function DemandCapacityChart({ data = [], onPickDay }) {
               onClick={() => onPickDay?.(d.date)}
               style={{ cursor: onPickDay ? 'pointer' : 'default' }}
             >
-              {/* full-height hit band — easier to hover than thin bars */}
-              <rect x={cx - step / 2} y={PAD.t} width={step} height={innerH} fill={isHover ? 'rgba(255,255,255,0.025)' : 'transparent'} />
-              {segs.map((s) => (
-                <rect key={s.key} x={s.x} y={s.y} width={s.w} height={s.h} fill={s.color} rx="2" opacity={isHover ? 1 : 0.92} />
-              ))}
+              <rect x={bandX} y={PAD.t} width={Math.max(1, bandRight - bandX)} height={innerH} fill={isHover ? 'rgba(255,255,255,0.04)' : 'transparent'} />
               {isHover && (
-                <line x1={cx} x2={cx} y1={PAD.t} y2={PAD.t + innerH} stroke="rgba(255,255,255,0.35)" strokeDasharray="2 3" />
+                <line x1={xs[i]} x2={xs[i]} y1={PAD.t} y2={PAD.t + innerH} stroke="rgba(255,255,255,0.35)" strokeDasharray="2 3" />
+              )}
+              {isHover && (
+                <>
+                  <circle cx={xs[i]} cy={yArrI[i]} r="3.2" fill={COLORS.internal}   stroke="#0B0D12" strokeWidth="1.3" />
+                  <circle cx={xs[i]} cy={yArrF[i]} r="3.2" fill={COLORS.freelancer} stroke="#0B0D12" strokeWidth="1.3" />
+                  <circle cx={xs[i]} cy={yArrT[i]} r="3.2" fill={COLORS.ta}         stroke="#0B0D12" strokeWidth="1.3" />
+                  <circle cx={xs[i]} cy={yFor(d.cap)} r="3.5" fill={COLORS.capacity} stroke="#0B0D12" strokeWidth="1.3" />
+                </>
               )}
             </g>
           );
         })}
 
-        {/* capacity line on top */}
-        <path d={linePath} fill="none" stroke={COLORS.capacity} strokeWidth="2" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 3px ${COLORS.capacity})` }} />
-        {hover != null && (
-          <circle cx={xFor(hover)} cy={yFor(series[hover].cap)} r={4} fill={COLORS.capacity} />
-        )}
-
-        {/* X-axis labels — selective, "1 Jun" on month boundaries, "5" otherwise */}
+        {/* X-axis labels */}
         {labelIndexes.map((i) => (
           <text
             key={`x${i}`}
-            x={xFor(i)}
-            y={H - 8}
+            x={xs[i]}
+            y={H - 10}
             fontSize="10"
             fill={hover === i ? 'var(--text-primary)' : 'rgba(154,160,188,0.85)'}
             textAnchor="middle"
@@ -186,8 +216,6 @@ export default function DemandCapacityChart({ data = [], onPickDay }) {
         ))}
       </svg>
 
-      {/* Persistent readout strip — replaces the floating tooltip so the
-          stats are always visible whether or not the mouse is on the chart */}
       <div className={`dash-chart-readout${active ? ' is-active' : ''}`}>
         {active ? (
           <>

@@ -7,7 +7,6 @@ import {
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
 import ExportButton from '../components/ExportButton.jsx';
-import SyncButton from '../components/SyncButton.jsx';
 import { exportToExcel } from '../lib/exportExcel.js';
 
 import KpiStrip            from '../components/dash/KpiStrip.jsx';
@@ -16,7 +15,7 @@ import ActivePipeline      from '../components/dash/ActivePipeline.jsx';
 import TrackCoverage       from '../components/dash/TrackCoverage.jsx';
 
 /* ============================================================
-   Dashboard — Trainer Capacity Planner
+   Dashboard — Trainer Allocation Dashboard
    ------------------------------------------------------------
    Analytical command-centre composed of:
      • Date-range filter (Start / End + Apply / Reset)
@@ -190,7 +189,6 @@ export default function Overview({ active }) {
           onApply={(s, e) => { setRangeStart(s); setRangeEnd(e); }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <SyncButton />
           <ExportButton
             onClick={handleExport}
             disabled={!rtRows.length && !chartData.length}

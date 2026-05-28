@@ -182,7 +182,6 @@ function PipeRow({ r, onOpen }) {
 
   return (
     <li className={`dash-pipe-row dash-pipe-row-${tone}`}>
-      <div className={`dash-pipe-bar dash-pipe-bar-${tone}`} />
       <div className="dash-pipe-meta">
         <div className="dash-pipe-title">{r.course || r.delivery_id || '—'}</div>
         <div className="dash-pipe-meta-line">
