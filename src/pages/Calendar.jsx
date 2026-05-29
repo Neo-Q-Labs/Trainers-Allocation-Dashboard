@@ -6,6 +6,7 @@ import {
   useGetRequestTrackQuery,
 } from '../store/api.js';
 import { LoadingPanel, ErrorPanel } from '../components/PanelState.jsx';
+import Loader from '../components/Loader.jsx';
 import RequirementModal from '../components/RequirementModal.jsx';
 import { buildRequirementRow, findRawByDeliveryId } from '../lib/req.js';
 import { exportToExcel } from '../lib/exportExcel.js';
@@ -356,7 +357,7 @@ export default function Calendar({ active }) {
         {/* ---- View body ---- */}
         <div className="gc-body">
           {loadingYear && !yearRes ? (
-            <div className="gc-loading">Loading…</div>
+            <div className="gc-loading"><Loader label="Loading calendar…" /></div>
           ) : view === 'month'   ? <MonthView  cursor={cursor} dayData={dayData} onDay={openDay} />
             : view === 'week'    ? <WeekView   selected={selected} dayData={dayData} onDay={openDayWeek} />
             : view === 'quarter' ? <MiniGrid   months={quarterMonths(cursor)} cols={3} dayData={dayData} onDay={openDay} />
@@ -568,7 +569,7 @@ function GanttView({ gantt, loading, cursor, search, setSearch, toggle, setToggl
     });
   }, [gantt, search, toggle]);
 
-  if (loading && !gantt) return <div className="gc-loading">Loading Gantt…</div>;
+  if (loading && !gantt) return <div className="gc-loading"><Loader label="Loading Gantt…" /></div>;
 
   return (
     <div className="cal-gantt">

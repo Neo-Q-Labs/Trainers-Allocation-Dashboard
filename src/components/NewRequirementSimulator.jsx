@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSimulateRequirementMutation } from '../store/api.js';
 import DatePicker from './DatePicker.jsx';
+import Loader from './Loader.jsx';
 
 const TYPE_COLOR = {
   FT: 'var(--neon-red)',
@@ -253,6 +254,12 @@ export default function NewRequirementSimulator({ open, onClose }) {
               <div className="sim-empty-text">
                 Click <strong>Simulate</strong> to scan <strong>Trainer Data Live</strong> for trainers free every day in your range and matching the tech stack.
               </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="sim-empty" style={{ paddingTop: 24, paddingBottom: 24 }}>
+              <Loader size="lg" label="Simulating coverage…" />
             </div>
           )}
 

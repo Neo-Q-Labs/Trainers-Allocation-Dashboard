@@ -1,9 +1,13 @@
 /**
  * PanelState.jsx — Shared loading and error states for all dashboard panels.
  * Pages initialize with null state and render these until the API responds.
+ *
+ * The loading state uses the QLabs lightning-bolt loader (the brand's loading
+ * identity) instead of a generic spinner.
  */
+import Loader from './Loader.jsx';
 
-export function LoadingPanel({ panelId, active }) {
+export function LoadingPanel({ panelId, active, label = 'Loading from live Excel…' }) {
   return (
     <section className={`panel${active ? ' active' : ''}`} data-panel={panelId}>
       <div
@@ -12,29 +16,11 @@ export function LoadingPanel({ panelId, active }) {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          minHeight: '320px',
+          minHeight: '420px',
           gap: '18px',
-          color: 'var(--text-muted)',
         }}
       >
-        <div
-          style={{
-            width: '36px',
-            height: '36px',
-            border: '2.5px solid var(--border, #2a2a3a)',
-            borderTopColor: 'var(--accent-text, #6366f1)',
-            borderRadius: '50%',
-            animation: 'panel-spin 0.75s linear infinite',
-          }}
-        />
-        <span style={{ fontSize: '13px', letterSpacing: '0.04em' }}>
-          Loading from live Excel…
-        </span>
-        <style>{`
-          @keyframes panel-spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+        <Loader size="lg" label={label} />
       </div>
     </section>
   );

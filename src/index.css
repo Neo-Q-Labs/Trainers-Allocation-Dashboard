@@ -1,3 +1,4 @@
 @import "tailwindcss";
 
 @import "./_styles.css";
+@import "./loader.css";

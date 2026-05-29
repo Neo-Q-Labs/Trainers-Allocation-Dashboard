@@ -1,0 +1,121 @@
+/* ─── Q Labs bolt loader (theme-responsive) ─────────────────
+   Import once, globally. Component: Loader.jsx (.ql-loader / .ql-*).
+
+   A faint track + a neon line that sketches itself + a translucent fill
+   that energises + two bolt-shaped shockwaves — seamless 2.6s loop.
+
+   Theme: defaults to dark; a `.light` (or `body.light`) ancestor switches
+   to the light treatment — the Neo Q Labs convention. For standalone /
+   system-driven theming, uncomment the prefers-color-scheme block below. */
+.ql-loader {
+  --loop: 2.6s;
+  --neon: #5a4bff;
+  --neon-soft: #8b7dff;
+  --neon-core: #eceaff;
+  --draw-stroke: #eceaff;                 /* white-hot on dark */
+  --stage-bg: transparent;
+  --grid-op: 0;
+  --grid-c: rgba(140, 130, 255, 0.05);
+  /* --size and --glow are set by the component per size */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+}
+.light .ql-loader,
+body.light .ql-loader { --draw-stroke: var(--neon); --grid-c: rgba(90, 75, 255, 0.07); }
+
+/* full-screen boot/overlay — fills the viewport with a themed stage */
+.ql-loader.ql-full {
+  position: fixed; inset: 0; z-index: 9999; overflow: hidden; gap: 1.6rem;
+  --grid-op: 1;
+  --stage-bg: radial-gradient(120% 120% at 50% 50%, #15142e 0%, #07070f 70%);
+  background: var(--stage-bg);
+}
+.light .ql-loader.ql-full,
+body.light .ql-loader.ql-full {
+  --stage-bg: radial-gradient(120% 120% at 50% 50%, #f5f5fc 0%, #e6e6f1 75%);
+}
+.ql-loader.ql-full::before {
+  content: ""; position: absolute; inset: 0; opacity: var(--grid-op); pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-c) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-c) 1px, transparent 1px);
+  background-size: 58px 58px;
+  -webkit-mask-image: radial-gradient(closest-side at 50% 50%, #000 18%, transparent 70%);
+  mask-image: radial-gradient(closest-side at 50% 50%, #000 18%, transparent 70%);
+}
+
+.ql-bolt-svg { position: relative; width: var(--size, 200px); height: auto; overflow: visible; }
+
+/* faint always-on outline so the redraw reads as a recharge, not a blink */
+.ql-track {
+  fill: none; stroke: var(--neon); stroke-width: 2.6;
+  stroke-linejoin: round; stroke-linecap: round; opacity: 0.13;
+}
+/* the neon line that sketches itself */
+.ql-draw {
+  fill: none; stroke: var(--draw-stroke, var(--neon)); stroke-width: 2.6;
+  stroke-linejoin: round; stroke-linecap: round;
+  stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
+  filter:
+    drop-shadow(0 0 calc(var(--glow) * 0.3) var(--neon-soft))
+    drop-shadow(0 0 var(--glow) var(--neon))
+    drop-shadow(0 0 calc(var(--glow) * 1.9) var(--neon));
+  animation: qlDraw var(--loop) cubic-bezier(0.65, 0, 0.35, 1) infinite,
+             qlFlash var(--loop) ease-out infinite;
+}
+/* translucent body that energises after the sketch */
+.ql-fill { fill: var(--neon); opacity: 0; animation: qlFill var(--loop) ease-in-out infinite; }
+/* bolt-shaped shockwaves */
+.ql-pulse {
+  fill: none; stroke: var(--neon); stroke-width: 2.4;
+  stroke-linejoin: round; stroke-linecap: round; opacity: 0;
+  transform-box: fill-box; transform-origin: center;
+  filter: drop-shadow(0 0 calc(var(--glow) * 0.5) var(--neon));
+  animation: qlPulse var(--loop) cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+.ql-pulse.p2 { animation-delay: calc(var(--loop) * 0.07); }
+.ql-loader-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--text-muted, #5a6080);
+}
+
+@keyframes qlDraw {
+  0%   { stroke-dashoffset: var(--len); opacity: 0; }
+  6%   { opacity: 1; }
+  8%   { stroke-dashoffset: var(--len); }
+  46%  { stroke-dashoffset: 0; }
+  88%  { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes qlFlash {
+  0%, 44%   { filter: drop-shadow(0 0 calc(var(--glow) * 0.3) var(--neon-soft)) drop-shadow(0 0 var(--glow) var(--neon)) drop-shadow(0 0 calc(var(--glow) * 1.9) var(--neon)); }
+  50%       { filter: drop-shadow(0 0 calc(var(--glow) * 0.4) var(--neon-core)) drop-shadow(0 0 calc(var(--glow) * 1.6) var(--neon)) drop-shadow(0 0 calc(var(--glow) * 3.2) var(--neon)); }
+  70%, 100% { filter: drop-shadow(0 0 calc(var(--glow) * 0.3) var(--neon-soft)) drop-shadow(0 0 var(--glow) var(--neon)) drop-shadow(0 0 calc(var(--glow) * 1.9) var(--neon)); }
+}
+@keyframes qlFill {
+  0%, 42% { opacity: 0; }
+  58%     { opacity: 0.24; }
+  86%     { opacity: 0.24; }
+  100%    { opacity: 0; }
+}
+@keyframes qlPulse {
+  0%, 44% { transform: scale(1); opacity: 0; }
+  52%     { opacity: 0.7; }
+  100%    { transform: scale(2.05); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ql-draw, .ql-fill, .ql-pulse { animation: none; }
+  .ql-draw { stroke-dashoffset: 0; opacity: 1; }
+}
+
+/* Standalone / system-driven theming (no app theme class). Enable if the
+   host has no `.light` toggle:
+@media (prefers-color-scheme: light) {
+  .ql-loader { --draw-stroke: var(--neon); --grid-c: rgba(90,75,255,0.07); }
+  .ql-loader.ql-full { --stage-bg: radial-gradient(120% 120% at 50% 50%, #f5f5fc 0%, #e6e6f1 75%); }
+}
+*/
