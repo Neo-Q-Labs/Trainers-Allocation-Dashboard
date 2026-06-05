@@ -433,13 +433,13 @@ export default function Pending({ active }) {
           <div className="rq-table-wrap">
             <table className="rq-table pa-table">
               <colgroup>
-                <col style={{ width: '30%' }} />
-                <col style={{ width: '17%' }} />
-                <col style={{ width: '8%' }} />
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '22%' }} />
+                <col style={{ width: '6%' }} />
                 <col style={{ width: '9%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '15%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '18%' }} />
               </colgroup>
               <thead>
                 <tr>
