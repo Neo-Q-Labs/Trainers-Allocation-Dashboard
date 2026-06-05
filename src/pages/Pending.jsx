@@ -117,11 +117,25 @@ export default function Pending({ active }) {
   const [clientF, setClientF]   = useState('');
   const [domainF, setDomainF]   = useState('');
   const [typeF, setTypeF]       = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate]     = useState('');
   const [page, setPage]         = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [sortBy, setSortBy]     = useState('start');
   const [sortDir, setSortDir]   = useState('asc');
   const [selected, setSelected] = useState(null);
+
+  const parseIsoDay = (s) => {
+    if (!s) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return Date.UTC(y, m - 1, d);
+  };
+  const fromTs = useMemo(() => parseIsoDay(fromDate), [fromDate]);
+  const toTs   = useMemo(() => {
+    const v = parseIsoDay(toDate);
+    return v == null ? null : v + 86400000 - 1; // include the full end day
+  }, [toDate]);
 
   const rows = useMemo(() => (data?.rows || []).map(summariseRow), [data]);
 
@@ -150,6 +164,15 @@ export default function Pending({ active }) {
         if (typeF === 'MIXED'      && !/mixed/i.test(r.requirementType))    return false;
         if (typeF === 'INTERNAL'   && t === '') return false;
       }
+      if (fromTs != null || toTs != null) {
+        const s = excelSerialToDate(r.start)?.getTime() ?? null;
+        const e = excelSerialToDate(r.end)?.getTime()   ?? s;
+        if (s == null && e == null) return false;
+        const rs = s ?? e;
+        const re = e ?? s;
+        if (fromTs != null && re < fromTs) return false;
+        if (toTs   != null && rs > toTs)   return false;
+      }
       if (!q) return true;
       return (
         r.delivery_id.toLowerCase().includes(q) ||
@@ -159,7 +182,7 @@ export default function Pending({ active }) {
         r.subdomain.toLowerCase().includes(q)
       );
     });
-  }, [rows, statusF, search, clientF, domainF, typeF]);
+  }, [rows, statusF, search, clientF, domainF, typeF, fromTs, toTs]);
 
   const sorted = useMemo(() => {
     const SORT_KEYS = {
@@ -192,7 +215,7 @@ export default function Pending({ active }) {
   };
 
   // Reset page on filter change
-  useEffect(() => { setPage(1); }, [search, statusF, clientF, domainF, typeF, pageSize]);
+  useEffect(() => { setPage(1); }, [search, statusF, clientF, domainF, typeF, fromDate, toDate, pageSize]);
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage  = Math.min(page, pageCount);
@@ -201,9 +224,10 @@ export default function Pending({ active }) {
   const rangeStart = sorted.length ? startIdx + 1 : 0;
   const rangeEnd   = startIdx + visible.length;
 
-  const anyFilter = !!(statusF !== 'all' || search || clientF || domainF || typeF || sortBy);
+  const anyFilter = !!(statusF !== 'all' || search || clientF || domainF || typeF || fromDate || toDate || sortBy);
   const resetAll = () => {
     setStatusF('all'); setSearch(''); setClientF(''); setDomainF(''); setTypeF('');
+    setFromDate(''); setToDate('');
     setSortBy('start'); setSortDir('asc');
   };
 
@@ -322,33 +346,64 @@ export default function Pending({ active }) {
           </button>
         </div>
 
-        {/* ---- Single-row filter band: Client · Domain · Type · Reset ---- */}
+        {/* ---- Single-row filter band: Client · Domain · Type · Date Range · Reset ---- */}
         <div className="pa-filters">
-          <div className="pa-filter-group">
+          <label className="pa-filter-cell">
             <span className="rq-filter-section-label">Client</span>
             <select className="pa-select" value={clientF} onChange={(e) => setClientF(e.target.value)}>
-              <option value="">All</option>
+              <option value="">All clients</option>
               {opts.clients.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-          </div>
-          <div className="pa-filter-group">
+          </label>
+          <label className="pa-filter-cell">
             <span className="rq-filter-section-label">Domain</span>
             <select className="pa-select" value={domainF} onChange={(e) => setDomainF(e.target.value)}>
-              <option value="">All</option>
+              <option value="">All domains</option>
               {opts.domains.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
-          </div>
-          <div className="pa-filter-group">
+          </label>
+          <label className="pa-filter-cell">
             <span className="rq-filter-section-label">Type</span>
             <select className="pa-select" value={typeF} onChange={(e) => setTypeF(e.target.value)}>
-              <option value="">All</option>
+              <option value="">All types</option>
               {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+          </label>
+          <div className="pa-filter-cell pa-filter-cell-date">
+            <span className="rq-filter-section-label">Date range</span>
+            <div className="pa-date-range">
+              <input
+                type="date"
+                className="pa-date-input"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(e) => setFromDate(e.target.value)}
+                aria-label="From date"
+              />
+              <span className="pa-date-sep">→</span>
+              <input
+                type="date"
+                className="pa-date-input"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(e) => setToDate(e.target.value)}
+                aria-label="To date"
+              />
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  className="pa-date-clear"
+                  aria-label="Clear date range"
+                  onClick={() => { setFromDate(''); setToDate(''); }}
+                >×</button>
+              )}
+            </div>
           </div>
-          <div className="pa-filter-spacer" />
-          {anyFilter && (
-            <button type="button" className="rq-clear-all" onClick={resetAll}>Reset all</button>
-          )}
+          <div className="pa-filter-actions">
+            {anyFilter && (
+              <button type="button" className="rq-clear-all" onClick={resetAll}>Reset all</button>
+            )}
+          </div>
         </div>
 
         {/* ---- Table ---- */}

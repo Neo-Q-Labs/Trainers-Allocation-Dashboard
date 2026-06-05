@@ -7220,24 +7220,69 @@ body.light .statusbar { background: rgba(248, 250, 252, 0.96); }
 .pa-stat-ok .pa-stat-val { color: var(--neon-green); }
 .pa-stat-pending { box-shadow: inset 0 0 0 1px rgba(245, 197, 66, 0.4); background: rgba(245, 197, 66, 0.06); }
 
-/* ---- Single-row filter band ---- */
+/* ---- Single-row filter band — grid so every cell shares the viewport ---- */
 .pa-filters {
-  display: flex; align-items: center; gap: 14px;
-  flex-wrap: nowrap;
-  padding: 12px 16px;
+  display: grid;
+  /* Client · Domain · Type · Date range · Reset */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr) auto;
+  align-items: end;
+  gap: 14px;
+  padding: 14px 16px;
   margin-bottom: 16px;
   background: var(--bg-secondary);
   border-radius: var(--r12);
-  overflow-x: auto;
 }
-.pa-filter-group {
-  display: inline-flex; align-items: center; gap: 10px;
-  flex-shrink: 0;
+.pa-filter-cell {
+  display: flex; flex-direction: column; gap: 6px;
+  min-width: 0;
 }
-.pa-filter-group .rq-filter-section-label { flex: 0 0 auto; }
-.pa-filter-spacer { flex: 1 1 auto; min-width: 0; }
-.pa-filters .pa-select { min-width: 160px; }
-.pa-filters .rq-clear-all { flex-shrink: 0; }
+.pa-filter-cell .rq-filter-section-label { padding-left: 2px; }
+.pa-filter-actions { display: flex; align-items: end; justify-content: flex-end; }
+.pa-filters .pa-select {
+  width: 100%; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.pa-date-range {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  height: 36px; padding: 0 10px;
+  background: var(--bg-primary);
+  box-shadow: inset 0 0 0 1px var(--border);
+  border-radius: var(--r10);
+  min-width: 0;
+}
+.pa-date-range:focus-within { box-shadow: inset 0 0 0 1px rgba(3,37,189,0.4); }
+.pa-date-input {
+  background: transparent; border: 0; outline: none;
+  color: var(--text-primary);
+  font: 500 12.5px/1 var(--font);
+  color-scheme: dark;
+  min-width: 0; width: 100%;
+}
+body.light .pa-date-input { color-scheme: light; }
+.pa-date-input::-webkit-calendar-picker-indicator { filter: invert(0.5); cursor: pointer; }
+body.light .pa-date-input::-webkit-calendar-picker-indicator { filter: none; }
+.pa-date-sep { color: var(--text-muted); font-size: 13px; opacity: 0.55; }
+.pa-date-clear {
+  display: inline-grid; place-items: center;
+  width: 20px; height: 20px;
+  background: var(--hi-soft); color: var(--text-muted);
+  border: 0; border-radius: 999px;
+  font-size: 14px; line-height: 1; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.pa-date-clear:hover { background: var(--hi-strong); color: var(--text-primary); }
+
+@media (max-width: 1100px) {
+  .pa-filters {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .pa-filter-cell-date { grid-column: span 2; }
+  .pa-filter-actions   { grid-column: span 2; justify-content: flex-end; }
+}
 .pa-select {
   appearance: none; -webkit-appearance: none;
   background: var(--bg-primary); box-shadow: inset 0 0 0 1px var(--border); border: 0;
