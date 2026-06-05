@@ -67,9 +67,11 @@ export default function Login({ onLoginSuccess }) {
     // the last error so we surface the real failure (wrong password etc.)
     // rather than a misleading "role mismatch" if the user is on the right
     // tab but the account happens to be a PM.
+    // MongoDB stores the role as plain "programmanager" (no underscore); we
+    // try the snake-case variant too in case the backend normalises differently.
     const rolesToTry = role === 'admin'
       ? ['admin']
-      : ['teamlead', 'program_manager', 'manager'];
+      : ['teamlead', 'programmanager', 'program_manager', 'manager'];
 
     let lastErr = null;
     for (const r of rolesToTry) {

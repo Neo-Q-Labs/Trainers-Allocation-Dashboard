@@ -28,11 +28,11 @@ export default function Topbar({ user, activePanel }) {
   let displayRole = 'EMPLOYEE';
   if (user?.role) {
     const r = user.role.toLowerCase();
-    if (r === 'admin')                                        displayRole = 'ADMIN';
-    else if (r === 'teamlead' || r === 'lead')                displayRole = 'TEAM LEAD';
-    else if (r === 'program_manager' || r === 'pm')           displayRole = 'PROGRAM MANAGER';
-    else if (r === 'manager')                                 displayRole = 'MANAGER';
-    else                                                      displayRole = user.role.replace(/_/g, ' ').toUpperCase();
+    if (r === 'admin')                                                          displayRole = 'ADMIN';
+    else if (r === 'teamlead' || r === 'lead')                                  displayRole = 'TEAM LEAD';
+    else if (r === 'programmanager' || r === 'program_manager' || r === 'pm')   displayRole = 'PROGRAM MANAGER';
+    else if (r === 'manager')                                                   displayRole = 'MANAGER';
+    else                                                                        displayRole = user.role.replace(/_/g, ' ').toUpperCase();
   }
 
   return (
