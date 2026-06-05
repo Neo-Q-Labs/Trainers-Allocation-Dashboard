@@ -100,6 +100,26 @@ function summariseRow(row) {
 // / "Total demand" = all) — no separate chip group needed.
 const TYPE_OPTIONS = ['INTERNAL', 'FREELANCER', 'MIXED'];
 
+// Three-letter compact label so the Type cell doesn't waste width — the full
+// Requirement Type string can be 8+ chars ("INTERNAL", "INTERNAL/FREE", etc.)
+// which used to crowd the Window column.
+function shortType(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (!s) return '—';
+  if (/wilp/.test(s)) return 'WILP';
+  if (/\bmixed\b/.test(s) || (/internal/.test(s) && /(freelanc|\bfree\b)/.test(s))) return 'MIX';
+  if (/freelanc|\bfree\b/.test(s)) return 'FRL';
+  if (/internal/.test(s)) return 'INT';
+  return s.slice(0, 3).toUpperCase();
+}
+function typeChipCls(short) {
+  if (short === 'INT')  return 'pa-type-int';
+  if (short === 'FRL')  return 'pa-type-frl';
+  if (short === 'MIX')  return 'pa-type-mix';
+  if (short === 'WILP') return 'pa-type-wilp';
+  return 'pa-type-na';
+}
+
 const statusGroup = (tone) => {
   if (tone === 'pending') return 'pending';
   if (tone === 'neutral') return 'neutral';
@@ -413,27 +433,23 @@ export default function Pending({ active }) {
           <div className="rq-table-wrap">
             <table className="rq-table pa-table">
               <colgroup>
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '22%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '7%' }} />
+                <col style={{ width: '30%' }} />
+                <col style={{ width: '17%' }} />
                 <col style={{ width: '8%' }} />
-                <col style={{ width: '10%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '15%' }} />
               </colgroup>
               <thead>
                 <tr>
-                  <th><SortHeader label="Delivery ID"   sortKey="delivery_id" {...{ sortBy, sortDir, onSort: handleSort }} /></th>
-                  <th><SortHeader label="Course / Client" sortKey="course"    {...{ sortBy, sortDir, onSort: handleSort }} /></th>
-                  <th><SortHeader label="Window"        sortKey="start"      {...{ sortBy, sortDir, onSort: handleSort }} /></th>
-                  <th><SortHeader label="Type"          sortKey="type"       {...{ sortBy, sortDir, onSort: handleSort }} /></th>
-                  <th className="rq-th-num"><SortHeader label="Demand" sortKey="demand" {...{ sortBy, sortDir, onSort: handleSort }} align="right" /></th>
-                  <th className="rq-th-num"><SortHeader label="INT · FRL" sortKey="filled" {...{ sortBy, sortDir, onSort: handleSort }} align="right" /></th>
-                  <th className="rq-th-num"><SortHeader label="Gap" sortKey="gap" {...{ sortBy, sortDir, onSort: handleSort }} align="right" /></th>
-                  <th><SortHeader label="Status"        sortKey="status"     {...{ sortBy, sortDir, onSort: handleSort }} /></th>
-                  <th><SortHeader label="Onboarding"    sortKey="onboarding" {...{ sortBy, sortDir, onSort: handleSort }} /></th>
+                  <th><SortHeader label="Course / Client" sortKey="course"   {...{ sortBy, sortDir, onSort: handleSort }} /></th>
+                  <th><SortHeader label="Window"          sortKey="start"    {...{ sortBy, sortDir, onSort: handleSort }} /></th>
+                  <th><SortHeader label="Type"            sortKey="type"     {...{ sortBy, sortDir, onSort: handleSort }} /></th>
+                  <th className="rq-th-num"><SortHeader label="Demand"     sortKey="demand" {...{ sortBy, sortDir, onSort: handleSort }} align="right" /></th>
+                  <th className="rq-th-num"><SortHeader label="INT · FRL"  sortKey="filled" {...{ sortBy, sortDir, onSort: handleSort }} align="right" /></th>
+                  <th className="rq-th-num"><SortHeader label="Gap"        sortKey="gap"    {...{ sortBy, sortDir, onSort: handleSort }} align="right" /></th>
+                  <th><SortHeader label="Onboarding"      sortKey="onboarding" {...{ sortBy, sortDir, onSort: handleSort }} /></th>
                 </tr>
               </thead>
               <tbody>
@@ -475,22 +491,38 @@ export default function Pending({ active }) {
 function PendingRow({ r, onClick }) {
   const internalPct   = r.required ? (r.internal   / r.required) * 100 : 0;
   const freelancerPct = r.required ? (r.freelancer / r.required) * 100 : 0;
+  const shortT = shortType(r.requirementType);
+  const typeClass = typeChipCls(shortT);
   return (
-    <tr className="rq-row cursor-pointer" onClick={onClick}>
-      <td className="rq-cell-id"><span className="rq-id">{r.delivery_id || '—'}</span></td>
-      <td className="rq-cell-cc">
-        <div className="rq-cc-title">{r.course || r.client || '—'}</div>
-        {(r.client || r.domain) && (
-          <div className="rq-cc-sub">
-            {[r.client, r.domain, r.subdomain].filter(Boolean).join(' · ')}
+    <tr className={`rq-row cursor-pointer pa-row-tone-${r.tone}`} onClick={onClick}>
+      {/* Course / Client — status dot prefix + delivery ID stashed as sub-caption */}
+      <td className="pa-course-cell">
+        <span
+          className={`pa-row-dot pa-row-dot-${r.tone}`}
+          title={r.status}
+          aria-label={`Status: ${r.status}`}
+        />
+        <div className="pa-course-block">
+          <div className="rq-cc-title" title={r.course || r.client || '—'}>
+            {r.course || r.client || '—'}
           </div>
-        )}
+          <div className="rq-cc-sub">
+            <span className="pa-row-id">{r.delivery_id || '—'}</span>
+            {r.client && r.course && <span className="pa-row-sep">·</span>}
+            {r.client && r.course && <span>{r.client}</span>}
+            {r.domain && <span className="pa-row-sep">·</span>}
+            {r.domain && <span>{r.domain}{r.subdomain ? ` · ${r.subdomain}` : ''}</span>}
+          </div>
+        </div>
       </td>
       <td><span className="rq-when">{fmtDate(r.start)} → {fmtDate(r.end)}</span></td>
       <td>
-        {r.requirementType
-          ? <span className={`pa-type-chip pa-type-${(r.requirementType || '').toLowerCase().includes('intern') ? 'int' : 'frl'}`}>{r.requirementType}</span>
-          : <span className="rq-num">—</span>}
+        <span
+          className={`pa-type-chip ${typeClass}`}
+          title={r.requirementType || '—'}
+        >
+          {shortT}
+        </span>
       </td>
       <td className="rq-cell-num">
         <span className="rq-num">{r.trainerReq}/{r.taReq}</span>
@@ -509,12 +541,6 @@ function PendingRow({ r, onClick }) {
       </td>
       <td className="rq-cell-num">
         <span className={`rq-num${r.gap > 0 ? ' is-warn' : ''}`}>{r.gap || '—'}</span>
-      </td>
-      <td>
-        <span className={`pa-status-chip pa-status-${r.tone}`}>
-          <span className="pa-status-dot" />
-          {r.status}
-        </span>
       </td>
       <td><span className="rq-when">{fmtDate(r.onboarding)}</span></td>
     </tr>

@@ -7303,14 +7303,55 @@ body.light .pa-date-input::-webkit-calendar-picker-indicator { filter: none; }
 
 /* ---- Pending row chips / mini-bar / per-row affordances ---- */
 .pa-type-chip {
-  display: inline-flex; align-items: center;
-  padding: 4px 10px;
-  font: 800 10px/1 var(--font); letter-spacing: 0.08em; text-transform: uppercase;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 42px; padding: 4px 8px;
+  font: 800 10px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
   border-radius: var(--r8);
   white-space: nowrap;
 }
-.pa-type-int { background: rgba(34,211,165,0.12); color: var(--neon-green); }
-.pa-type-frl { background: rgba(245,197,66,0.12); color: var(--neon-yellow); }
+.pa-type-int  { background: rgba(34,211,165,0.14); color: var(--neon-green); }
+.pa-type-frl  { background: rgba(245,197,66,0.14); color: var(--neon-yellow); }
+.pa-type-mix  { background: rgba(3,37,189,0.16);   color: var(--accent-text); }
+.pa-type-wilp { background: rgba(3,37,189,0.16);   color: var(--accent-text); }
+.pa-type-na   { background: rgba(74,80,104,0.18);  color: var(--text-muted); }
+
+/* ---- Course/Client cell with status dot + stashed delivery ID ---- */
+.pa-course-cell {
+  display: flex; align-items: flex-start; gap: 10px;
+  min-width: 0;
+}
+.pa-row-dot {
+  flex: 0 0 9px;
+  width: 9px; height: 9px;
+  border-radius: 999px;
+  background: var(--text-muted);
+  margin-top: 7px;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.02);
+}
+.pa-row-dot-pending  { background: var(--neon-yellow); box-shadow: 0 0 6px rgba(245,197,66,0.5); }
+.pa-row-dot-ok       { background: var(--neon-green);  box-shadow: 0 0 6px rgba(34,211,165,0.4); }
+.pa-row-dot-ok-mix   { background: var(--accent);      box-shadow: 0 0 6px rgba(3,37,189,0.5); }
+.pa-row-dot-ok-fl    { background: var(--neon-yellow); box-shadow: 0 0 6px rgba(245,197,66,0.4); opacity: 0.8; }
+.pa-row-dot-neutral  { background: var(--text-muted); }
+
+.pa-course-block {
+  display: flex; flex-direction: column; gap: 3px;
+  min-width: 0; flex: 1;
+}
+.pa-course-block .rq-cc-sub {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-top: 2px;
+}
+.pa-row-id {
+  font: 500 11.5px/1.2 var(--mono);
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+.pa-row-sep { color: var(--text-muted); opacity: 0.45; }
+
+/* Subtle row tinting so pending rows draw the eye without a status column */
+.pa-row-tone-pending td { background: rgba(245, 197, 66, 0.025); }
+.pa-row-tone-pending:hover td { background: rgba(245, 197, 66, 0.05); }
 
 .pa-status-chip {
   display: inline-flex; align-items: center; gap: 6px;
