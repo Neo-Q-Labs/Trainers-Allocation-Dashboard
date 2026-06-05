@@ -66,14 +66,20 @@ async def login(body: LoginRequest) -> Any:
     user_role = str(user.get("role") or "user").strip().lower()
     
     # If a role is requested in the login form, verify that it matches the user's actual role in MongoDB
+    # The frontend's "Employee" tab tries multiple non-admin roles (teamlead, programmanager,
+    # program_manager, manager) — accept any of the team-lead-equivalent shapes here.
     if body.role:
         req_role = body.role.strip().lower().replace(" ", "").replace("_", "")
         actual_role = user_role.replace(" ", "").replace("_", "")
-        if req_role == "teamlead":
-            if actual_role not in ("teamlead", "lead", "manager", "teamleads", "sme"):
+        team_lead_equivalents = (
+            "teamlead", "lead", "manager", "teamleads", "sme",
+            "programmanager", "pm",
+        )
+        if req_role in team_lead_equivalents:
+            if actual_role not in team_lead_equivalents:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied. Your account is not registered as a Team Lead."
+                    detail="Access denied. Your account is not registered as a Team Lead or Program Manager."
                 )
         elif req_role == "admin":
             if actual_role != "admin":
@@ -82,13 +88,20 @@ async def login(body: LoginRequest) -> Any:
                     detail="Access denied. Your account is not registered as an Admin."
                 )
     
-    # Role checking: Only Admins and Team Leads are authorized to access this dashboard
-    allowed_roles = {"admin", "team lead", "team_lead", "teamlead", "lead", "manager", "teamleads", "sme"}
+    # Role checking: Admins, Team Leads, and Program Managers are authorized to access this dashboard.
+    # MongoDB stores the role as plain "programmanager" (no space, no underscore) — we accept all
+    # casing/spacing variants for safety.
+    allowed_roles = {
+        "admin",
+        "team lead", "team_lead", "teamlead", "lead",
+        "manager", "teamleads", "sme",
+        "programmanager", "program manager", "program_manager", "pm",
+    }
     if user_role not in allowed_roles:
         logger.warning(f"Forbidden login attempt: User '{email_clean}' has unauthorized role '{user_role}'.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Only Admins and Team Leads are authorized to access this dashboard."
+            detail="Access denied. Only Admins, Team Leads, and Program Managers are authorized to access this dashboard."
         )
         
     access_token = create_access_token(data={"sub": user_email})
