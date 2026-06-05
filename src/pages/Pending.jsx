@@ -96,11 +96,8 @@ function summariseRow(row) {
   };
 }
 
-const STATUS_FILTERS = [
-  { id: 'all',       label: 'All' },
-  { id: 'pending',   label: 'Pending' },
-  { id: 'completed', label: 'Completed' },
-];
+// Status filter is driven by the clickable KPI tiles ("Pending" / "Completed"
+// / "Total demand" = all) — no separate chip group needed.
 const TYPE_OPTIONS = ['INTERNAL', 'FREELANCER', 'MIXED'];
 
 const statusGroup = (tone) => {
@@ -288,44 +285,45 @@ export default function Pending({ active }) {
           </div>
         </header>
 
-        {/* ---- KPI strip ---- */}
+        {/* ---- KPI strip (each tile doubles as a status filter) ---- */}
         <div className="pa-strip">
-          <div className="pa-stat pa-stat-pending">
+          <button
+            type="button"
+            className={`pa-stat pa-stat-pending${statusF === 'pending' ? ' is-active' : ''}`}
+            aria-pressed={statusF === 'pending'}
+            onClick={() => setStatusF(statusF === 'pending' ? 'all' : 'pending')}
+            title="Filter to Pending requirements"
+          >
             <div className="pa-stat-val">{kpis.pendingCount}</div>
             <div className="pa-stat-key">Pending</div>
             <div className="pa-stat-sub">{kpis.totalGap} unfilled slots</div>
-          </div>
-          <div className="pa-stat pa-stat-ok">
+          </button>
+          <button
+            type="button"
+            className={`pa-stat pa-stat-ok${statusF === 'completed' ? ' is-active' : ''}`}
+            aria-pressed={statusF === 'completed'}
+            onClick={() => setStatusF(statusF === 'completed' ? 'all' : 'completed')}
+            title="Filter to Completed requirements"
+          >
             <div className="pa-stat-val">{kpis.completedCount}</div>
             <div className="pa-stat-key">Completed</div>
             <div className="pa-stat-sub">across {kpis.totalRows} requirements</div>
-          </div>
-          <div className="pa-stat">
+          </button>
+          <button
+            type="button"
+            className={`pa-stat${statusF === 'all' ? ' is-active' : ''}`}
+            aria-pressed={statusF === 'all'}
+            onClick={() => setStatusF('all')}
+            title="Show every requirement"
+          >
             <div className="pa-stat-val">{kpis.totalDemand}</div>
             <div className="pa-stat-key">Total demand</div>
             <div className="pa-stat-sub">trainer + TA seats</div>
-          </div>
+          </button>
         </div>
 
-        {/* ---- Filter row: status chips · client · domain · type · reset ---- */}
+        {/* ---- Single-row filter band: Client · Domain · Type · Reset ---- */}
         <div className="pa-filters">
-          <div className="pa-filter-group">
-            <span className="rq-filter-section-label">Status</span>
-            <div className="rq-status-chips rq-status-chips-inline" role="tablist">
-              {STATUS_FILTERS.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={statusF === f.id}
-                  className={`rq-chip${statusF === f.id ? ' is-active' : ''}`}
-                  onClick={() => setStatusF(f.id)}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
           <div className="pa-filter-group">
             <span className="rq-filter-section-label">Client</span>
             <select className="pa-select" value={clientF} onChange={(e) => setClientF(e.target.value)}>
@@ -347,6 +345,7 @@ export default function Pending({ active }) {
               {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+          <div className="pa-filter-spacer" />
           {anyFilter && (
             <button type="button" className="rq-clear-all" onClick={resetAll}>Reset all</button>
           )}

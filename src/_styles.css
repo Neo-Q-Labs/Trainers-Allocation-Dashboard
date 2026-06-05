@@ -7177,7 +7177,24 @@ body.light .statusbar { background: rgba(248, 250, 252, 0.96); }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  position: relative;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
 }
+.pa-stat:hover { background: var(--bg-surface-hi); transform: translateY(-1px); box-shadow: inset 0 0 0 1px var(--hi-strong); }
+.pa-stat.is-active { box-shadow: inset 0 0 0 1.5px rgba(3,37,189,0.55), 0 0 0 3px rgba(3,37,189,0.10); }
+.pa-stat.is-active.pa-stat-pending { box-shadow: inset 0 0 0 1.5px rgba(245,197,66,0.65), 0 0 0 3px rgba(245,197,66,0.12); }
+.pa-stat.is-active.pa-stat-ok      { box-shadow: inset 0 0 0 1.5px rgba(34,211,165,0.65), 0 0 0 3px rgba(34,211,165,0.12); }
+.pa-stat.is-active::after {
+  content: "✓";
+  position: absolute; top: 10px; right: 12px;
+  font: 800 11px/1 var(--font);
+  color: var(--accent-text); opacity: 0.85;
+}
+.pa-stat-pending.is-active::after { color: var(--neon-yellow); }
+.pa-stat-ok.is-active::after      { color: var(--neon-green); }
 .pa-stat-val {
   font-family: var(--mono);
   font-size: 26px;
@@ -7203,19 +7220,24 @@ body.light .statusbar { background: rgba(248, 250, 252, 0.96); }
 .pa-stat-ok .pa-stat-val { color: var(--neon-green); }
 .pa-stat-pending { box-shadow: inset 0 0 0 1px rgba(245, 197, 66, 0.4); background: rgba(245, 197, 66, 0.06); }
 
-/* ---- Filter row (status chips · client · domain · type · reset) ---- */
+/* ---- Single-row filter band ---- */
 .pa-filters {
   display: flex; align-items: center; gap: 14px;
-  flex-wrap: wrap;
-  padding: 14px 16px;
+  flex-wrap: nowrap;
+  padding: 12px 16px;
   margin-bottom: 16px;
   background: var(--bg-secondary);
   border-radius: var(--r12);
+  overflow-x: auto;
 }
 .pa-filter-group {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
 }
 .pa-filter-group .rq-filter-section-label { flex: 0 0 auto; }
+.pa-filter-spacer { flex: 1 1 auto; min-width: 0; }
+.pa-filters .pa-select { min-width: 160px; }
+.pa-filters .rq-clear-all { flex-shrink: 0; }
 .pa-select {
   appearance: none; -webkit-appearance: none;
   background: var(--bg-primary); box-shadow: inset 0 0 0 1px var(--border); border: 0;
