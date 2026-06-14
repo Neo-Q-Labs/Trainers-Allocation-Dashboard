@@ -108,21 +108,6 @@ async def get_current_user(token: str | None = Depends(oauth2_scheme)) -> dict[s
     if "password" in user:
         del user["password"] # Never return the hashed password in current user payload
         
-    # Role checking: Admins, Team Leads, and Program Managers are authorized.
-    # Mirrors the allow-list in routers/auth.py so the per-request guard accepts
-    # the same set as the initial /auth/login check. MongoDB stores the role as
-    # plain "programmanager" (no space, no underscore).
-    user_role = str(user.get("role") or "user").strip().lower()
-    allowed_roles = {
-        "admin",
-        "team lead", "team_lead", "teamlead", "lead",
-        "manager", "teamleads", "sme",
-        "programmanager", "program manager", "program_manager", "pm",
-    }
-    if user_role not in allowed_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Only Admins, Team Leads, and Program Managers are authorized to access this dashboard."
-        )
-        
+    # No role gate — the dashboard is open to every authenticated user.
+    # Any user with a valid token can call any protected endpoint.
     return user
