@@ -62,59 +62,36 @@ export default function Login({ onLoginSuccess }) {
       setErrorMsg('Please enter both ID and password.');
       return;
     }
-    // The Employee tab covers every non-admin role the timesheet DB stores:
-    // Team Lead, Program Manager, and Manager. Try each in order and keep
-    // the last error so we surface the real failure (wrong password etc.)
-    // rather than a misleading "role mismatch" if the user is on the right
-    // tab but the account happens to be a PM.
-    // MongoDB stores the role as plain "programmanager" (no underscore); we
-    // try the snake-case variant too in case the backend normalises differently.
-    const rolesToTry = role === 'admin'
-      ? ['admin']
-      : ['teamlead', 'programmanager', 'program_manager', 'manager'];
+    // The backend no longer gates by role — any authenticated user can sign in.
+    // We still send the tab's role string so the client can pick Admin theming
+    // server-side if needed, but a single request is sufficient.
+    try {
+      const response = await login({
+        email: email.trim(),
+        password: password.trim(),
+        role,
+      }).unwrap();
 
-    let lastErr = null;
-    for (const r of rolesToTry) {
-      try {
-        const response = await login({
-          email: email.trim(),
-          password: password.trim(),
-          role: r,
-        }).unwrap();
-
-        if (response?.access_token) {
-          localStorage.setItem('token', response.access_token);
-          localStorage.setItem('user', JSON.stringify(response.user));
-          onLoginSuccess(response.access_token, response.user);
-          if (window.showToast) {
-            window.showToast('Login Successful', `Welcome back, ${response.user.name}!`, 'ok');
-          }
-          return;
+      if (response?.access_token) {
+        localStorage.setItem('token', response.access_token);
+        localStorage.setItem('user', JSON.stringify(response.user));
+        onLoginSuccess(response.access_token, response.user);
+        if (window.showToast) {
+          window.showToast('Login Successful', `Welcome back, ${response.user.name}!`, 'ok');
         }
-      } catch (err) {
-        lastErr = err;
-        // If the backend says the credentials themselves are bad, bail —
-        // no point hammering it for every role. We only retry on role-
-        // mismatch shaped failures (403 / "role" / "forbidden" / "access").
-        const status = err?.status;
-        const detail = String(err?.data?.detail || err?.message || '').toLowerCase();
-        const isRoleMismatch = status === 403 || /\brole\b|forbidden|not allowed|access denied/.test(detail);
-        if (!isRoleMismatch && rolesToTry.length > 1) {
-          // Wrong-password / network / other — don't try further roles.
-          break;
-        }
+        return;
       }
-    }
-
-    const detail = lastErr?.data?.detail || lastErr?.message || 'Invalid credentials. Access denied.';
-    setErrorMsg(detail);
-    if (window.showToast) {
-      window.showToast('Authentication Failed', detail, 'err');
-    }
-    const form = document.getElementById('ta-login-form');
-    if (form) {
-      form.classList.add('shake');
-      setTimeout(() => form.classList.remove('shake'), 400);
+    } catch (err) {
+      const detail = err?.data?.detail || err?.message || 'Invalid credentials. Access denied.';
+      setErrorMsg(detail);
+      if (window.showToast) {
+        window.showToast('Authentication Failed', detail, 'err');
+      }
+      const form = document.getElementById('ta-login-form');
+      if (form) {
+        form.classList.add('shake');
+        setTimeout(() => form.classList.remove('shake'), 400);
+      }
     }
   };
 
